@@ -1,6 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
 import { createServer } from "http";
 
 const app = express();
@@ -59,6 +58,24 @@ app.use((req, res, next) => {
   next();
 });
 
+// API Gateway Info endpoint
+app.get("/", (req, res) => {
+  res.json({
+    name: "Tatum API Gateway",
+    version: "1.0.0",
+    description: "Enterprise-grade blockchain API gateway supporting 130+ blockchains",
+    status: "running",
+    endpoints: {
+      health: "GET /api/health",
+      pricing: "GET /api/pricing",
+      chains: "GET /api/chains",
+      docs: "https://github.com/MasterFital/tatum-api-gateway#api-documentation",
+    },
+    docs: "https://api.tatum.io/docs",
+    github: "https://github.com/MasterFital/tatum-api-gateway",
+  });
+});
+
 (async () => {
   await registerRoutes(httpServer, app);
 
@@ -70,20 +87,15 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
-  }
+  // Fallback 404 handler
+  app.use((req, res) => {
+    res.status(404).json({
+      error: "Not Found",
+      path: req.path,
+      message: "This API endpoint does not exist. See GET / for available endpoints.",
+    });
+  });
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
     {
@@ -92,7 +104,13 @@ app.use((req, res, next) => {
       reusePort: true,
     },
     () => {
-      log(`serving on port ${port}`);
+      log(`API Gateway running on port ${port}`);
+      log(`Environment: ${process.env.NODE_ENV || "development"}`);
+      if (process.env.TATUM_API_KEY) {
+        log("✓ Tatum API configured");
+      } else {
+        log("⚠ WARNING: TATUM_API_KEY not configured");
+      }
     },
   );
 })();
