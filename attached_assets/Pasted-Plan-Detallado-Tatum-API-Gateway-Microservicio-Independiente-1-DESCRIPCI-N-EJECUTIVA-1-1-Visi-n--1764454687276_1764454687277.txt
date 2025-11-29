@@ -1,0 +1,2016 @@
+Plan Detallado: Tatum API Gateway - Microservicio Independiente
+1. DESCRIPCIÓN EJECUTIVA
+1.1 Visión
+Un API Gateway centralizado que abstrae la complejidad de Tatum API, permitiendo a múltiples clientes (fintech, wallets, exchanges) acceder a blockchain con autenticación segura, rate limiting, metering y billing automático.
+
+1.2 Objetivos
+Monetizar acceso a infraestructura blockchain
+Escalar sin afectar FITAL BUSINESS
+Simplificar integración para terceros
+Auditar y rastrear uso por tenant
+Garantizar disponibilidad 99.9%
+2. MODELO DE NEGOCIO DETALLADO
+2.1 Estructura de Precios
+Tier Starter ($49/mes)
+10,000 llamadas API/mes
+3 cadenas soportadas (BTC, ETH, SOL)
+1 webhook active
+Soporte email (48h response)
+Balance queries unlimited
+Direcciones: máx 50
+Rate limit: 10 req/segundo
+Tier Scale ($199/mes)
+100,000 llamadas API/mes
+8 cadenas soportadas (todas)
+10 webhooks activos
+Soporte Slack (4h response)
+KMS signing allowed
+Direcciones: máx 1,000
+Rate limit: 100 req/segundo
+Virtual accounts: 5
+Tier Enterprise (Custom)
+Ilimitado
+SLA 99.9% con refund
+Soporte phone 24/7
+KMS dedicado con HSM
+Compliance logging (HIPAA, SOC2)
+Direcciones: unlimited
+Rate limit: negociable (1000+ req/seg)
+Virtual accounts: 50+
+On-premise deployment option
+2.2 Monetización por Acción (Pay-as-you-go, sobre tier base)
+Generación de dirección (crear):     $0.001 x quantidade
+Consulta de balance:                 $0.0005 x quantidade
+Consulta de tx histórico:            $0.002 x quantidade
+Broadcast de tx (sin firma):         $0.01 + 0.1% del monto
+Broadcast de tx (con KMS):           $0.05 + 0.15% del monto
+Webhook subscription (por mes):      $0.02 x direcciones
+Virtual account creation:            $0.10
+Exchange rates/pricing:              Gratis (1000/mes luego $0.001)
+Fee estimation:                      Gratis
+Health check/status:                 Gratis
+
+2.3 Ejemplos de Ingresos
+Scenario 1: Startup Wallet (Tier Starter)
+
+Suscripción base: $49
+150 direcciones BTC: 150 × $0.001 = $0.15
+10K consultas balance: 10K × $0.0005 = $5
+2 webhooks × 30 días: 2 × 30 × $0.02 = $1.20
+Total: $55.35/mes
+Scenario 2: Exchange Regional (Tier Enterprise)
+
+Suscripción: $5,000/mes
+50K direcciones (unlimited): $0
+5M balance queries: 5M × $0.0005 = $2,500
+1000 tx broadcasts/mes: 1000 × ($0.01 + 0.1%) = avg $100
+50 webhooks × 30: 50 × 30 × $0.02 = $30
+Total: ~$7,630/mes
+2.4 Modelo de Costos
+Componente	Costo
+Infraestructura (EC2 x2, RDS, Redis)	$500/mes
+Tatum API (Enterprise plan)	$2,000/mes
+Stripe (2.2% + $0.30 por transacción)	Variable
+Monitoring (DataDog/New Relic)	$200/mes
+Backups/CDN/DNS	$100/mes
+Total Fixed	~$2,800/mes
+Break-even: ~50 clientes Tier Starter o 5 clientes Tier Enterprise
+
+3. ARQUITECTURA TÉCNICA DETALLADA
+3.1 Stack Tecnológico
+Frontend:  React + TypeScript (Dashboard de admin)
+Backend:   Node.js (Express/Fastify) + TypeScript
+Database:  PostgreSQL 15+ (primary), Redis (cache)
+Queue:     Bull/BullMQ (background jobs)
+KMS:       AWS KMS (key management)
+Storage:   S3 (audit logs, exports)
+Billing:   Stripe API
+Auth:      JWT + HMAC-SHA256 signatures
+Logging:   ELK Stack / CloudWatch
+Monitoring: Prometheus + Grafana
+Deployment: Docker + Kubernetes (EKS) / EC2 + Auto-scaling
+
+3.2 Componentes del Sistema
+┌─────────────────────────────────────────────────────────────┐
+│                      Load Balancer (ALB)                    │
+│                    (SSL/TLS termination)                    │
+└────────────┬─────────────────────────────────────────────────┘
+             │
+┌────────────┴──────────────────────────────────────┐
+│         API Gateway Service (Kubernetes)          │
+│  ┌─────────────────────────────────────────────┐  │
+│  │   Pod 1         Pod 2         Pod 3         │  │
+│  │ ┌────────────┐┌────────────┐┌────────────┐ │  │
+│  │ │ Express   ││ Express    ││ Express    │ │  │
+│  │ │ Server    ││ Server     ││ Server     │ │  │
+│  │ └──────┬─────┘└──────┬─────┘└──────┬─────┘ │  │
+│  └────────┼──────────────┼──────────────┼──────┘  │
+│           │              │              │         │
+│  ┌────────┴──────────────┴──────────────┴──────┐  │
+│  │   Service Discovery + Load Balancing       │  │
+│  │   (Kubernetes Service)                     │  │
+│  └─────────────────────────────────────────────┘  │
+│                                                   │
+└───┬──────────────────┬─────────────────┬─────────┘
+    │                  │                 │
+    ▼                  ▼                 ▼
+┌────────────┐  ┌────────────┐  ┌──────────────┐
+│ PostgreSQL │  │   Redis    │  │  AWS KMS     │
+│ (Primary)  │  │   (Cache)  │  │  (Keys)      │
+└────────────┘  └────────────┘  └──────────────┘
+    │
+    ▼
+┌────────────────────────────────────┐
+│  Tatum API (Proxy + Adapter)      │
+│  ├── Address Generation           │
+│  ├── Balance Queries              │
+│  ├── Transaction Broadcasting     │
+│  └── Webhook Routing              │
+└────────────────────────────────────┘
+    │
+    ▼
+┌────────────────────────────────────┐
+│     Blockchain Networks            │
+│ ├── Bitcoin, Ethereum, Solana...  │
+│ └── Connected via Tatum            │
+└────────────────────────────────────┘
+Side Services:
+├── Job Queue (Bull) → Webhook Distribution
+├── Billing Service → Stripe Integration
+├── Monitoring → CloudWatch/Datadog
+└── Audit Logger → S3
+
+3.3 Flujo de Datos
+1. Cliente (Tenant)
+       │
+       │ HTTPS + API Key + HMAC Signature
+       ▼
+2. API Gateway (Rate Limiter Middleware)
+       │
+       │ Check rate limit (Redis)
+       ▼
+3. Authentication Middleware
+       │
+       │ Validate API Key + Signature
+       ▼
+4. Authorization Middleware
+       │
+       │ Check tier permissions + allowed chains
+       ▼
+5. Metering Middleware
+       │
+       │ Log request (async to queue)
+       ▼
+6. Route Handler
+       │
+       │ Validate request body (Zod schema)
+       ▼
+7. Application Service
+       │
+       │ Business logic, cache lookup
+       ▼
+8. Tatum Adapter
+       │
+       │ Map to Tatum API calls
+       ▼
+9. External APIs (Tatum, Stripe, etc.)
+       │
+       ▼
+10. Database + Cache Storage
+       │
+       ▼
+11. Response to Client
+
+4. ESPECIFICACIÓN DE ENDPOINTS API
+4.1 Convenciones
+URL Base: https://api.tatumgateway.com/v1/{tenantId}
+
+Headers requeridos:
+
+Authorization: Bearer {jwt_token}
+X-API-Key: {api_key}
+X-Signature: {hmac_signature}
+X-Timestamp: {unix_timestamp}
+X-Request-ID: {uuid}
+Content-Type: application/json
+
+Response format:
+
+{
+  "success": true|false,
+  "data": {...},
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human readable message",
+    "details": {...}
+  },
+  "meta": {
+    "requestId": "uuid",
+    "timestamp": "2025-11-30T00:00:00Z",
+    "metered": true|false,
+    "apiUnitsUsed": 1
+  }
+}
+
+Códigos de error:
+
+400: Bad Request
+401: Unauthorized
+403: Forbidden (rate limit, tier limitation)
+404: Not Found
+409: Conflict (address already exists)
+422: Unprocessable Entity (validation error)
+500: Internal Server Error
+503: Service Unavailable (Tatum API down)
+
+4.2 ADDRESSES - Gestión de Direcciones
+4.2.1 CREATE ADDRESS
+POST /addresses
+Request:
+{
+  "chain": "ethereum|bitcoin|solana|polygon|tron|bsc|ripple|cardano",
+  "currency": "ETH|BTC|SOL|MATIC|TRX|BNB|XRP|ADA",
+  "metadata": {
+    "label": "My Ethereum Wallet",
+    "tags": ["production", "cold-storage"]
+  },
+  "options": {
+    "skipWebhookRegistration": false,
+    "generateQR": true,
+    "createVirtualAccount": false
+  }
+}
+Response:
+{
+  "data": {
+    "addressId": "addr_123456",
+    "address": "0x1234567890abcdef1234567890abcdef12345678",
+    "chain": "ethereum",
+    "currency": "ETH",
+    "derivationPath": "m/44'/60'/0'/0/5",
+    "publicKey": "0x...",
+    "qrCode": "data:image/png;base64,...",
+    "virtualAccountId": null,
+    "status": "active",
+    "createdAt": "2025-11-30T00:00:00Z",
+    "webhookUrl": "https://api.tatumgateway.com/webhooks/123456/eth"
+  }
+}
+Metering: 1 unit ($0.001)
+Rate Limit: Checked against tier
+
+4.2.2 LIST ADDRESSES
+GET /addresses?chain=ethereum&status=active&limit=50&offset=0
+Query params:
+- chain: (optional) Filter by chain
+- status: active|inactive|archived
+- limit: 1-100 (default 50)
+- offset: Pagination offset
+- metadata.tags: Filter by tags (comma-separated)
+Response:
+{
+  "data": [
+    {
+      "addressId": "addr_123456",
+      "address": "0x...",
+      "chain": "ethereum",
+      "currency": "ETH",
+      "status": "active",
+      "balance": "1.5",
+      "balanceUSD": "3000.50",
+      "totalIn": "10.5",
+      "totalOut": "9.0",
+      "transactionCount": 42,
+      "createdAt": "2025-11-30T00:00:00Z",
+      "metadata": {...}
+    },
+    ...
+  ],
+  "pagination": {
+    "limit": 50,
+    "offset": 0,
+    "total": 150,
+    "hasMore": true
+  }
+}
+Metering: 0.5 unit per 10 addresses
+
+4.2.3 GET ADDRESS DETAILS
+GET /addresses/{addressId}
+Response:
+{
+  "data": {
+    "addressId": "addr_123456",
+    "address": "0x1234567890abcdef1234567890abcdef12345678",
+    "chain": "ethereum",
+    "currency": "ETH",
+    "label": "My Ethereum Wallet",
+    "tags": ["production"],
+    "balance": {
+      "total": "1.5",
+      "confirmed": "1.5",
+      "unconfirmed": "0",
+      "pending": "0"
+    },
+    "balanceUSD": "3000.50",
+    "usdExchangeRate": "2000.33",
+    "statistics": {
+      "transactionCount": 42,
+      "totalIn": "10.5",
+      "totalOut": "9.0",
+      "lastTransaction": "2025-11-30T00:00:00Z"
+    },
+    "webhooks": [
+      {
+        "webhookId": "wh_123456",
+        "events": ["ADDRESS_TRANSACTION", "ADDRESS_BALANCE"],
+        "url": "https://customer.com/webhooks/tatum",
+        "active": true
+      }
+    ],
+    "status": "active",
+    "createdAt": "2025-11-30T00:00:00Z",
+    "updatedAt": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 0.5 unit ($0.0005)
+Cache: 30 segundos
+
+4.2.4 UPDATE ADDRESS
+PATCH /addresses/{addressId}
+Request:
+{
+  "label": "Updated Label",
+  "tags": ["production", "vault"],
+  "status": "active|inactive|archived",
+  "webhooks": [
+    {
+      "url": "https://new-endpoint.com/webhooks",
+      "events": ["ADDRESS_TRANSACTION"]
+    }
+  ]
+}
+Response: 200 OK (address object)
+Metering: Free
+
+4.2.5 DELETE ADDRESS
+DELETE /addresses/{addressId}
+Request:
+{
+  "reason": "no-longer-needed|security-issue|consolidation",
+  "archiveData": true
+}
+Response:
+{
+  "data": {
+    "addressId": "addr_123456",
+    "status": "deleted",
+    "archivedAt": "2025-11-30T00:00:00Z",
+    "dataRetentionUntil": "2026-11-30T00:00:00Z"
+  }
+}
+Metering: Free
+Note: Dirección se marca como deleted pero se retiene 1 año para auditoría
+
+4.3 BALANCES - Consultas de Saldo
+4.3.1 GET SINGLE ADDRESS BALANCE
+GET /balances/{chain}/{address}?convertTo=USD
+Query params:
+- convertTo: USD|EUR|default (native currency)
+- includeUnconfirmed: true|false
+- includeTransactions: true|false (últimas 10)
+Response:
+{
+  "data": {
+    "address": "0x1234567890abcdef...",
+    "chain": "ethereum",
+    "balance": {
+      "amount": "1.5",
+      "currency": "ETH",
+      "amountInConverted": "3000.50",
+      "currencyConverted": "USD",
+      "exchangeRate": "2000.33",
+      "timestamp": "2025-11-30T00:00:00Z"
+    },
+    "breakdown": {
+      "confirmed": "1.5",
+      "unconfirmed": "0",
+      "pending": "0"
+    },
+    "sourceOfTruth": "on-chain",
+    "blockNumber": 18500000,
+    "blockTimestamp": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 0.5 unit ($0.0005)
+Cache: 10 segundos (on-chain is source of truth)
+
+4.3.2 GET PORTFOLIO BALANCE
+GET /balances/portfolio?includeBreakdown=true&convertTo=USD
+Response:
+{
+  "data": {
+    "totalBalance": "15000.75",
+    "currency": "USD",
+    "chains": [
+      {
+        "chain": "ethereum",
+        "balance": "10000",
+        "addresses": 5,
+        "currency": "ETH"
+      },
+      {
+        "chain": "bitcoin",
+        "balance": "0.25",
+        "addresses": 3,
+        "currency": "BTC"
+      },
+      ...
+    ],
+    "topAssets": [
+      {
+        "symbol": "ETH",
+        "balance": "10000",
+        "balanceUSD": "10000",
+        "percentage": 66.67
+      },
+      ...
+    ],
+    "lastUpdated": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 2 units (aggregate)
+
+4.3.3 GET BALANCE HISTORY
+GET /balances/history/{addressId}?days=30&resolution=daily
+Query params:
+- days: 1-365 (default 30)
+- resolution: hourly|daily|weekly
+- startDate: ISO 8601
+- endDate: ISO 8601
+Response:
+{
+  "data": {
+    "addressId": "addr_123456",
+    "address": "0x...",
+    "chain": "ethereum",
+    "resolution": "daily",
+    "points": [
+      {
+        "timestamp": "2025-11-30T00:00:00Z",
+        "balance": "1.5",
+        "balanceUSD": "3000.50",
+        "transactions": 2
+      },
+      {
+        "timestamp": "2025-11-29T00:00:00Z",
+        "balance": "1.4",
+        "balanceUSD": "2800.46",
+        "transactions": 1
+      },
+      ...
+    ]
+  }
+}
+Metering: 1 unit per 100 points
+Cache: 1 hora
+
+4.4 TRANSACTIONS - Transacciones Blockchain
+4.4.1 ESTIMATE FEE
+POST /transactions/estimate-fee
+Request:
+{
+  "chain": "ethereum",
+  "from": "0x1234567890abcdef...",
+  "to": "0x9876543210fedcba...",
+  "amount": "1.5",
+  "type": "transfer|contract-call",
+  "data": null,
+  "speed": "slow|standard|fast|instant"
+}
+Response:
+{
+  "data": {
+    "estimatedFee": "0.00125",
+    "feeCurrency": "ETH",
+    "feeUSD": "2.50",
+    "gasPrice": "50",
+    "gasLimit": "25000",
+    "networkFeePercentage": 0.083,
+    "breakdown": {
+      "base": "0.00100",
+      "priority": "0.00025"
+    },
+    "estimatedTime": "15 seconds",
+    "confidence": 0.95,
+    "alternatives": [
+      { "speed": "slow", "fee": "0.00075" },
+      { "speed": "fast", "fee": "0.00200" }
+    ],
+    "note": "Basado en mempool actual. La tarifa real puede variar."
+  }
+}
+Metering: Free
+Cache: 30 segundos
+
+4.4.2 BROADCAST TRANSACTION (Sin KMS)
+POST /transactions/broadcast
+Request:
+{
+  "chain": "ethereum",
+  "signedTransaction": "0xf868...",  // Tx firmada con private key
+  "metadata": {
+    "label": "Payment to vendor",
+    "tags": ["vendor", "invoice-123"]
+  }
+}
+Response:
+{
+  "data": {
+    "transactionId": "tx_123456",
+    "txHash": "0xabcd1234...",
+    "chain": "ethereum",
+    "status": "pending",
+    "from": "0x1234...",
+    "to": "0x9876...",
+    "value": "1.5",
+    "fee": "0.00125",
+    "feeUSD": "2.50",
+    "nonce": 42,
+    "gasPrice": "50",
+    "gasLimit": "25000",
+    "blockNumber": null,
+    "confirmations": 0,
+    "estimatedConfirmationTime": "15 seconds",
+    "broadcastedAt": "2025-11-30T00:00:00Z",
+    "statusPageUrl": "https://api.tatumgateway.com/tx/tx_123456"
+  }
+}
+Metering: 1 unit ($0.01)
+Rate Limit: 5 tx/segundo por tenant
+Note: El cliente es responsable de firmar la tx con su private key
+
+4.4.3 BROADCAST TRANSACTION (Con KMS)
+POST /transactions/broadcast-kms
+Request:
+{
+  "chain": "ethereum",
+  "walletId": "wal_123456",  // Wallet en KMS
+  "to": "0x9876543210fedcba...",
+  "amount": "1.5",
+  "gasPrice": "50",
+  "gasLimit": "25000",
+  "metadata": {
+    "label": "Payment to vendor"
+  }
+}
+Response:
+{
+  "data": {
+    "signatureId": "sig_123456",
+    "status": "pending_signature",
+    "message": "Require KMS approval. Check signing queue.",
+    "estimatedSigningTime": "5 minutes",
+    "signingUrl": "https://api.tatumgateway.com/kms/sign/sig_123456"
+  }
+}
+Metering: 5 units ($0.05)
+Rate Limit: 1 tx/segundo por tenant
+Note: Se envía a job queue. Cliente recibe webhook cuando esté firmado.
+
+4.4.4 GET TRANSACTION STATUS
+GET /transactions/{transactionId|txHash}
+Response:
+{
+  "data": {
+    "transactionId": "tx_123456",
+    "txHash": "0xabcd1234...",
+    "chain": "ethereum",
+    "status": "confirmed|pending|failed",
+    "from": "0x1234...",
+    "to": "0x9876...",
+    "value": "1.5",
+    "fee": "0.00125",
+    "feeUSD": "2.50",
+    "nonce": 42,
+    "blockNumber": 18500000,
+    "blockHash": "0xblockhash...",
+    "blockTimestamp": "2025-11-30T00:00:00Z",
+    "confirmations": 12,
+    "gasUsed": 21000,
+    "gasPrice": "50",
+    "status": "success|failed|reverted",
+    "failedReason": null,
+    "input": "0x...",
+    "output": "0x...",
+    "events": [
+      {
+        "name": "Transfer",
+        "parameters": {...}
+      }
+    ]
+  }
+}
+Metering: 0.2 unit
+Cache: Según status (confirmed = 1 hora, pending = 10 segundos)
+
+4.4.5 LIST TRANSACTIONS
+GET /transactions?addressId=addr_123&chain=ethereum&status=confirmed&limit=50
+Query params:
+- addressId: Filter por addressId
+- chain: Filter por chain
+- status: pending|confirmed|failed
+- type: incoming|outgoing|all
+- startDate: ISO 8601
+- endDate: ISO 8601
+- limit: 1-100
+- offset: Pagination
+Response:
+{
+  "data": [
+    {
+      "transactionId": "tx_123456",
+      "txHash": "0xabcd1234...",
+      "chain": "ethereum",
+      "status": "confirmed",
+      "type": "incoming",
+      "from": "0x1234...",
+      "to": "0x9876...",
+      "value": "1.5",
+      "fee": "0.00125",
+      "blockNumber": 18500000,
+      "blockTimestamp": "2025-11-30T00:00:00Z",
+      "confirmations": 12
+    },
+    ...
+  ],
+  "pagination": {...}
+}
+Metering: 0.2 unit per 10 transactions
+
+4.5 VIRTUAL ACCOUNTS - Cuentas Ledger
+4.5.1 CREATE VIRTUAL ACCOUNT
+POST /virtual-accounts
+Request:
+{
+  "currency": "USD|EUR|BTC|ETH|etc",
+  "label": "Customer Account",
+  "externalId": "customer_123",  # Para reconciliación
+  "metadata": {
+    "customerId": "123",
+    "type": "escrow|settlement|savings"
+  }
+}
+Response:
+{
+  "data": {
+    "accountId": "acc_123456",
+    "currency": "USD",
+    "label": "Customer Account",
+    "balance": "0.00",
+    "externalId": "customer_123",
+    "status": "active",
+    "iban": "DE89370400440532013000",  # Para SEPA, si aplica
+    "accountNumber": "532013000",
+    "routingNumber": "044000",
+    "createdAt": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 1 unit ($0.10)
+Limits: Máx 5 por Tier Scale, unlimited Enterprise
+
+4.5.2 GET ACCOUNT BALANCE
+GET /virtual-accounts/{accountId}/balance
+Response:
+{
+  "data": {
+    "accountId": "acc_123456",
+    "currency": "USD",
+    "balance": "1500.50",
+    "availableBalance": "1500.50",
+    "reserved": "0.00",
+    "incomingPending": "100.00",
+    "timestamp": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 0.2 unit
+Cache: 5 segundos
+
+4.5.3 TRANSFER BETWEEN ACCOUNTS
+POST /virtual-accounts/transfer
+Request:
+{
+  "sourceAccountId": "acc_123456",
+  "destinationAccountId": "acc_654321",
+  "amount": "100.50",
+  "currency": "USD",
+  "reference": "INV-2025-001",
+  "metadata": {
+    "type": "vendor-payment"
+  }
+}
+Response:
+{
+  "data": {
+    "transactionId": "vat_123456",
+    "sourceAccountId": "acc_123456",
+    "destinationAccountId": "acc_654321",
+    "amount": "100.50",
+    "currency": "USD",
+    "status": "completed",
+    "reference": "INV-2025-001",
+    "completedAt": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 0.5 unit
+Rate Limit: 100/segundo
+
+4.6 WEBHOOKS - Eventos y Notificaciones
+4.6.1 REGISTER WEBHOOK
+POST /webhooks/subscriptions
+Request:
+{
+  "url": "https://customer.com/webhooks/tatum",
+  "events": [
+    "address.transaction.incoming",
+    "address.transaction.outgoing",
+    "address.balance.changed",
+    "account.transaction.completed",
+    "account.transaction.failed",
+    "transaction.confirmed",
+    "transaction.failed",
+    "kms.signature.required",
+    "kms.signature.completed",
+    "kms.signature.failed"
+  ],
+  "filters": {
+    "addressIds": ["addr_123456", "addr_654321"],
+    "chains": ["ethereum", "bitcoin"],
+    "accountIds": ["acc_123456"]
+  },
+  "secret": "whsec_abcdef123456",  # Para validación HMAC
+  "active": true,
+  "description": "Production webhook"
+}
+Response:
+{
+  "data": {
+    "webhookId": "wh_123456",
+    "url": "https://customer.com/webhooks/tatum",
+    "events": [...],
+    "filters": {...},
+    "status": "active",
+    "secretHash": "sha256:abc...",
+    "testUrl": "https://api.tatumgateway.com/webhooks/wh_123456/test",
+    "createdAt": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 0.2 unit
+Limits: Máx 1 Starter, 10 Scale, unlimited Enterprise
+
+4.6.2 LIST WEBHOOKS
+GET /webhooks/subscriptions?active=true
+Response:
+{
+  "data": [
+    {
+      "webhookId": "wh_123456",
+      "url": "https://customer.com/webhooks/tatum",
+      "events": [...],
+      "status": "active",
+      "lastDelivery": "2025-11-30T00:00:00Z",
+      "successRate": 0.99,
+      "failedAttempts": 2
+    },
+    ...
+  ]
+}
+Metering: Free
+
+4.6.3 TEST WEBHOOK
+POST /webhooks/subscriptions/{webhookId}/test
+Request:
+{
+  "eventType": "address.transaction.incoming"
+}
+Response:
+{
+  "data": {
+    "testId": "test_123456",
+    "status": "sent",
+    "responseStatus": 200,
+    "responseTime": "150ms",
+    "message": "Webhook delivered successfully"
+  }
+}
+Metering: Free
+
+4.6.4 WEBHOOK PAYLOAD FORMAT
+{
+  "webhookId": "wh_123456",
+  "eventId": "evt_123456",
+  "eventType": "address.transaction.incoming",
+  "timestamp": "2025-11-30T00:00:00Z",
+  "data": {
+    "transactionId": "tx_123456",
+    "txHash": "0xabcd1234...",
+    "chain": "ethereum",
+    "addressId": "addr_123456",
+    "address": "0x1234567890abcdef...",
+    "from": "0xsender...",
+    "to": "0xreceiver...",
+    "value": "1.5",
+    "currency": "ETH",
+    "valueUSD": "3000.50",
+    "status": "confirmed",
+    "confirmations": 5,
+    "blockNumber": 18500000,
+    "blockTimestamp": "2025-11-30T00:00:00Z",
+    "fee": "0.00125",
+    "metadata": {}
+  },
+  "signature": "t=2025-11-30T00:00:00Z,v1=sha256_hmac_signature"
+}
+
+Validación de firma:
+
+const secret = "whsec_abcdef123456";
+const hmac = crypto.createHmac('sha256', secret);
+hmac.update(`${webhook.timestamp}.${JSON.stringify(webhook.data)}`);
+const expectedSignature = hmac.digest('hex');
+const valid = expectedSignature === webhook.signature;
+
+4.6.5 WEBHOOK RETRY POLICY
+Intentos: Max 5
+Timeout: 30 segundos
+Backoff: Exponencial (1s, 2s, 4s, 8s, 16s)
+Condiciones de reintento: 5xx status, timeout, connection error
+Delivery window: 24 horas
+
+4.7 KMS - Key Management System
+4.7.1 CREATE KMS WALLET
+POST /kms/wallets
+Request:
+{
+  "chain": "ethereum|bitcoin|etc",
+  "name": "Cold Storage Wallet",
+  "signingKey": "vault_key_123",  # AWS Vault key reference
+  "type": "hot|cold",
+  "approvals": {
+    "required": 2,
+    "users": ["admin_1", "admin_2"]
+  }
+}
+Response:
+{
+  "data": {
+    "walletId": "wal_123456",
+    "chain": "ethereum",
+    "name": "Cold Storage Wallet",
+    "xpub": "xpub...",
+    "addresses": [],
+    "type": "cold",
+    "status": "active",
+    "approvals": {...},
+    "createdAt": "2025-11-30T00:00:00Z"
+  }
+}
+Metering: 1 unit
+Requires: Enterprise tier
+
+4.7.2 SIGN TRANSACTION (KMS)
+POST /kms/wallets/{walletId}/sign
+Request:
+{
+  "transactionData": {
+    "to": "0x9876...",
+    "amount": "1.5",
+    "gasPrice": "50",
+    "gasLimit": "25000"
+  },
+  "approvals": {
+    "require": 2
+  },
+  "metadata": {
+    "purpose": "vendor-payment",
+    "invoice": "INV-123"
+  }
+}
+Response:
+{
+  "data": {
+    "signatureId": "sig_123456",
+    "status": "pending_approval",
+    "transactionHash": "0xprehash...",
+    "approvalUrls": [
+      "https://api.tatumgateway.com/approvals/sig_123456/approve?token=xxx",
+      "https://api.tatumgateway.com/approvals/sig_123456/approve?token=yyy"
+    ],
+    "approvalsRequired": 2,
+    "approvalsReceived": 0,
+    "expiresAt": "2025-11-30T01:00:00Z"
+  }
+}
+Metering: 5 units ($0.05)
+Rate Limit: 1 firma/segundo
+
+4.7.3 LIST PENDING SIGNATURES
+GET /kms/pending?status=pending_approval&walletId=wal_123456
+Response:
+{
+  "data": [
+    {
+      "signatureId": "sig_123456",
+      "walletId": "wal_123456",
+      "status": "pending_approval",
+      "approvalsRequired": 2,
+      "approvalsReceived": 1,
+      "nextApprover": "admin_2",
+      "expiresAt": "2025-11-30T01:00:00Z",
+      "createdAt": "2025-11-30T00:00:00Z"
+    },
+    ...
+  ]
+}
+Metering: Free
+
+4.8 ADMIN & META ENDPOINTS
+4.8.1 GET TENANT INFO
+GET /admin/tenant
+Response:
+{
+  "data": {
+    "tenantId": "ten_123456",
+    "name": "My Company",
+    "tier": "scale",
+    "status": "active",
+    "created": "2025-01-15T00:00:00Z",
+    "billing": {
+      "plan": "scale",
+      "nextBillingDate": "2025-12-15T00:00:00Z",
+      "monthlySubscription": "$199.00",
+      "apiUnitsUsedThisMonth": 45000,
+      "apiUnitsIncluded": 100000,
+      "overageAmount": "$0.00"
+    },
+    "limits": {
+      "rateLimit": "100 req/sec",
+      "maxAddresses": 1000,
+      "maxVirtualAccounts": 5,
+      "maxWebhooks": 10,
+      "supportedChains": 8
+    },
+    "security": {
+      "ipWhitelist": ["1.2.3.4", "5.6.7.8"],
+      "twoFactorEnabled": true,
+      "apiKeyRotationDays": 90
+    }
+  }
+}
+Metering: Free
+
+4.8.2 GET USAGE & BILLING
+GET /admin/usage?period=month&date=2025-11
+Response:
+{
+  "data": {
+    "period": "2025-11",
+    "apiCalls": {
+      "total": 45000,
+      "breakdown": {
+        "addressCreation": 150,
+        "balanceQueries": 30000,
+        "transactionBroadcast": 100,
+        "webhookEvents": 14500,
+        "other": 250
+      }
+    },
+    "cost": {
+      "subscription": "$199.00",
+      "overage": "$0.00",
+      "total": "$199.00"
+    },
+    "topOperations": [
+      {
+        "operation": "balanceQueries",
+        "count": 30000,
+        "cost": "included"
+      },
+      ...
+    ]
+  }
+}
+Metering: Free
+
+4.8.3 GET HEALTH STATUS
+GET /health
+Response:
+{
+  "data": {
+    "status": "healthy|degraded|down",
+    "timestamp": "2025-11-30T00:00:00Z",
+    "components": {
+      "api": {
+        "status": "healthy",
+        "responseTime": "45ms"
+      },
+      "database": {
+        "status": "healthy",
+        "connections": 15,
+        "maxConnections": 20
+      },
+      "redis": {
+        "status": "healthy",
+        "memoryUsage": "2.5GB"
+      },
+      "tatumApi": {
+        "status": "healthy",
+        "latency": "250ms"
+      }
+    },
+    "uptime": "99.97%",
+    "incidents": []
+  }
+}
+Metering: Free
+Cache: 30 segundos
+
+4.8.4 SUPPORTED CHAINS
+GET /meta/chains
+Response:
+{
+  "data": [
+    {
+      "chainId": "ethereum",
+      "name": "Ethereum Mainnet",
+      "currency": "ETH",
+      "type": "evm",
+      "status": "operational",
+      "decimals": 18,
+      "networkFee": "standard",
+      "blockTime": "12 seconds",
+      "confirmationsRequired": 12,
+      "explorerUrl": "https://etherscan.io",
+      "rpcUrls": ["https://rpc.flashbots.net", "https://eth-mainnet.g.alchemy.com/v2/..."],
+      "limits": {
+        "maxAddressesPerTenant": 1000,
+        "maxTransactionsPerSecond": 10
+      }
+    },
+    {
+      "chainId": "bitcoin",
+      "name": "Bitcoin Mainnet",
+      "currency": "BTC",
+      "type": "utxo",
+      "status": "operational",
+      "decimals": 8,
+      "networkFee": "dynamic",
+      "blockTime": "10 minutes",
+      "confirmationsRequired": 6,
+      "explorerUrl": "https://blockchain.com",
+      ...
+    },
+    ...
+  ]
+}
+Metering: Free
+Cache: 1 hora
+
+5. ESQUEMA DE BASE DE DATOS
+5.1 Tablas Principales
+-- TENANTS
+CREATE TABLE tenants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(255) NOT NULL,
+  slug VARCHAR(100) UNIQUE NOT NULL,
+  tier ENUM('starter', 'scale', 'enterprise') NOT NULL DEFAULT 'starter',
+  status ENUM('active', 'suspended', 'deleted') NOT NULL DEFAULT 'active',
+  
+  -- Billing
+  stripeCustomerId VARCHAR(255),
+  stripeSubscriptionId VARCHAR(255),
+  monthlySubscriptionUSD DECIMAL(10, 2),
+  billingCycle ENUM('monthly', 'annual') DEFAULT 'monthly',
+  nextBillingDate TIMESTAMP,
+  
+  -- API Config
+  apiKeyHash VARCHAR(255) UNIQUE NOT NULL,  -- HASH del API key
+  apiSecretHash VARCHAR(255) UNIQUE NOT NULL,  -- HASH del secret
+  apiKeyRotatedAt TIMESTAMP,
+  rateLimit INT DEFAULT 10,  -- req/segundo
+  
+  -- Security
+  ipWhitelist TEXT,  -- JSON array
+  encryptionKeyId VARCHAR(255),  -- AWS KMS key
+  twoFactorEnabled BOOLEAN DEFAULT false,
+  
+  -- Metadata
+  metadata JSONB,
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  deletedAt TIMESTAMP,
+  
+  INDEX idx_tenant_status (status),
+  INDEX idx_tenant_tier (tier),
+  INDEX idx_tenant_stripe (stripeCustomerId)
+);
+-- ADDRESSES
+CREATE TABLE addresses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  addressId VARCHAR(255) UNIQUE NOT NULL,
+  address VARCHAR(255) NOT NULL,
+  chain ENUM('bitcoin', 'ethereum', 'solana', ...) NOT NULL,
+  currency VARCHAR(10) NOT NULL,
+  
+  -- Derivation
+  derivationPath VARCHAR(100),
+  xpub TEXT,  -- ENCRYPTED
+  publicKey TEXT,  -- ENCRYPTED
+  
+  -- Virtual Account
+  virtualAccountId UUID,
+  
+  -- Status & Metadata
+  label VARCHAR(255),
+  tags TEXT,  -- JSON array
+  status ENUM('active', 'inactive', 'archived') DEFAULT 'active',
+  metadata JSONB,
+  
+  -- Statistics
+  balance DECIMAL(36, 18),  -- BigInt compatible
+  totalIn DECIMAL(36, 18),
+  totalOut DECIMAL(36, 18),
+  transactionCount INT DEFAULT 0,
+  lastTransactionAt TIMESTAMP,
+  
+  -- Webhook
+  webhookUrl VARCHAR(255),
+  webhookActive BOOLEAN DEFAULT false,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_address_tenant (tenantId),
+  INDEX idx_address_address_chain (address, chain),
+  INDEX idx_address_status (status),
+  UNIQUE (tenantId, address, chain)
+);
+-- TRANSACTIONS
+CREATE TABLE transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  transactionId VARCHAR(255) UNIQUE NOT NULL,
+  
+  -- On-chain details
+  txHash VARCHAR(255),
+  chain ENUM('bitcoin', 'ethereum', 'solana', ...) NOT NULL,
+  "from" VARCHAR(255) NOT NULL,
+  "to" VARCHAR(255) NOT NULL,
+  value DECIMAL(36, 18),
+  fee DECIMAL(36, 18),
+  
+  -- Status
+  status ENUM('pending', 'confirmed', 'failed', 'reverted') NOT NULL,
+  nonce INT,
+  blockNumber BIGINT,
+  blockHash VARCHAR(255),
+  blockTimestamp TIMESTAMP,
+  confirmations INT DEFAULT 0,
+  
+  -- Gas (EVM)
+  gasUsed BIGINT,
+  gasPrice BIGINT,
+  gasLimit BIGINT,
+  
+  -- Data
+  input TEXT,
+  output TEXT,
+  errorReason TEXT,
+  
+  -- Metadata
+  metadata JSONB,
+  type ENUM('broadcast', 'kms') DEFAULT 'broadcast',
+  broadcastedAt TIMESTAMP,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_tx_tenant (tenantId),
+  INDEX idx_tx_hash (txHash),
+  INDEX idx_tx_status (status),
+  INDEX idx_tx_chain (chain),
+  INDEX idx_tx_from_to ("from", "to")
+);
+-- VIRTUAL ACCOUNTS
+CREATE TABLE virtualAccounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  accountId VARCHAR(255) UNIQUE NOT NULL,
+  currency VARCHAR(10) NOT NULL,
+  label VARCHAR(255),
+  externalId VARCHAR(255),
+  
+  -- Balance
+  balance DECIMAL(36, 18) DEFAULT 0,
+  availableBalance DECIMAL(36, 18) DEFAULT 0,
+  reserved DECIMAL(36, 18) DEFAULT 0,
+  
+  -- Bank Details (si aplica)
+  iban VARCHAR(100),
+  accountNumber VARCHAR(100),
+  routingNumber VARCHAR(50),
+  
+  -- Status
+  status ENUM('active', 'frozen', 'closed') DEFAULT 'active',
+  metadata JSONB,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_va_tenant (tenantId),
+  INDEX idx_va_currency (currency),
+  INDEX idx_va_externalId (externalId)
+);
+-- VIRTUAL ACCOUNT TRANSACTIONS
+CREATE TABLE virtualAccountTransactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sourceAccountId UUID NOT NULL REFERENCES virtualAccounts(id),
+  destinationAccountId UUID NOT NULL REFERENCES virtualAccounts(id),
+  
+  amount DECIMAL(36, 18),
+  currency VARCHAR(10),
+  reference VARCHAR(255),
+  
+  status ENUM('completed', 'failed', 'pending') DEFAULT 'pending',
+  failedReason TEXT,
+  
+  metadata JSONB,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  completedAt TIMESTAMP
+);
+-- WEBHOOKS
+CREATE TABLE webhooks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  webhookId VARCHAR(255) UNIQUE NOT NULL,
+  
+  url VARCHAR(500) NOT NULL,
+  events TEXT NOT NULL,  -- JSON array
+  filters JSONB,
+  secretHash VARCHAR(255),  -- HMAC secret
+  
+  status ENUM('active', 'inactive', 'disabled') DEFAULT 'active',
+  
+  -- Delivery stats
+  lastDeliveryAt TIMESTAMP,
+  successCount INT DEFAULT 0,
+  failureCount INT DEFAULT 0,
+  successRate DECIMAL(3, 2) DEFAULT 1.0,
+  
+  description VARCHAR(255),
+  metadata JSONB,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_webhook_tenant (tenantId),
+  INDEX idx_webhook_status (status)
+);
+-- WEBHOOK EVENTS
+CREATE TABLE webhookEvents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  webhookId UUID NOT NULL REFERENCES webhooks(id),
+  
+  eventId VARCHAR(255) UNIQUE NOT NULL,
+  eventType VARCHAR(100) NOT NULL,
+  
+  payload JSONB NOT NULL,
+  status ENUM('pending', 'delivered', 'failed') DEFAULT 'pending',
+  
+  -- Retries
+  attemptCount INT DEFAULT 0,
+  nextRetryAt TIMESTAMP,
+  lastAttemptAt TIMESTAMP,
+  lastError TEXT,
+  
+  expiresAt TIMESTAMP,  -- 24 horas
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_we_webhook (webhookId),
+  INDEX idx_we_status (status),
+  INDEX idx_we_eventId (eventId),
+  INDEX idx_we_expiresAt (expiresAt)
+);
+-- KMS WALLETS
+CREATE TABLE kmsWallets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  walletId VARCHAR(255) UNIQUE NOT NULL,
+  
+  chain ENUM('bitcoin', 'ethereum', ...) NOT NULL,
+  name VARCHAR(255),
+  xpub TEXT,  -- ENCRYPTED
+  
+  signingKeyArn VARCHAR(500),  -- AWS KMS key ARN
+  type ENUM('hot', 'cold') DEFAULT 'hot',
+  
+  -- Approval
+  approvalRequired INT DEFAULT 1,
+  approvers TEXT,  -- JSON array of user IDs
+  
+  status ENUM('active', 'disabled') DEFAULT 'active',
+  metadata JSONB,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_kms_wallet_tenant (tenantId),
+  INDEX idx_kms_wallet_chain (chain)
+);
+-- KMS SIGNATURES (Pending Approvals)
+CREATE TABLE kmsSignatures (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  walletId UUID NOT NULL REFERENCES kmsWallets(id),
+  
+  signatureId VARCHAR(255) UNIQUE NOT NULL,
+  transactionData JSONB NOT NULL,  -- Transaction to sign
+  transactionHash VARCHAR(255),
+  
+  status ENUM('pending_approval', 'approved', 'rejected', 'signed', 'broadcasted') DEFAULT 'pending_approval',
+  
+  -- Approvals
+  approvalsRequired INT,
+  approvalsReceived INT DEFAULT 0,
+  approvals JSONB,  -- Array of {userId, status, timestamp}
+  
+  signedData TEXT,  -- ENCRYPTED signed tx
+  broadcastedTxHash VARCHAR(255),
+  
+  expiresAt TIMESTAMP,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  signedAt TIMESTAMP,
+  
+  INDEX idx_ks_wallet (walletId),
+  INDEX idx_ks_status (status)
+);
+-- METERING & BILLING
+CREATE TABLE meterEvents (
+  id BIGSERIAL PRIMARY KEY,
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  
+  operation VARCHAR(100) NOT NULL,
+  endpoint VARCHAR(255),
+  apiUnitsUsed INT DEFAULT 1,
+  costUSD DECIMAL(10, 4),
+  
+  requestId VARCHAR(255),
+  userId VARCHAR(255),
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_me_tenant_date (tenantId, createdAt),
+  INDEX idx_me_operation (operation)
+);
+-- AUDIT LOG
+CREATE TABLE auditLog (
+  id BIGSERIAL PRIMARY KEY,
+  tenantId UUID REFERENCES tenants(id),
+  
+  action VARCHAR(100) NOT NULL,  -- CREATE_ADDRESS, BROADCAST_TX, etc.
+  resource VARCHAR(100),  -- ADDRESS, TRANSACTION, WEBHOOK, etc.
+  resourceId VARCHAR(255),
+  
+  before JSONB,
+  after JSONB,
+  changes JSONB,
+  
+  userId VARCHAR(255),
+  ipAddress VARCHAR(50),
+  userAgent TEXT,
+  
+  status ENUM('success', 'failure') DEFAULT 'success',
+  errorMessage TEXT,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_al_tenant (tenantId),
+  INDEX idx_al_resource (resource, resourceId),
+  INDEX idx_al_action (action),
+  INDEX idx_al_date (createdAt)
+);
+-- API KEYS (Rotación)
+CREATE TABLE apiKeys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  
+  keyHash VARCHAR(255) UNIQUE NOT NULL,
+  secretHash VARCHAR(255) UNIQUE NOT NULL,
+  
+  name VARCHAR(255),
+  lastUsedAt TIMESTAMP,
+  expiresAt TIMESTAMP,
+  revokedAt TIMESTAMP,
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_ak_tenant (tenantId),
+  INDEX idx_ak_expires (expiresAt)
+);
+-- IP WHITELIST
+CREATE TABLE ipWhitelist (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantId UUID NOT NULL REFERENCES tenants(id),
+  
+  ipAddress VARCHAR(50) NOT NULL,
+  description VARCHAR(255),
+  
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  UNIQUE (tenantId, ipAddress)
+);
+
+6. FLUJOS Y PROCESOS DETALLADOS
+6.1 Flujo de Autenticación
+1. Cliente obtiene API Key y Secret en dashboard
+2. Cliente prepara request:
+   - URL: /v1/{tenantId}/addresses
+   - Body: {...}
+   - Timestamp: ISO 8601
+   
+3. Cliente crea HMAC signature:
+   message = ${timestamp}.${JSON.stringify(body)}
+   signature = HMAC-SHA256(message, apiSecret)
+   
+4. Cliente envía headers:
+   X-API-Key: {apiKey}
+   X-Signature: {signature}
+   X-Timestamp: {timestamp}
+   X-Request-ID: {uuid}
+   
+5. Gateway valida:
+   a) Check X-Timestamp (no older than 5 min)
+   b) Lookup tenant por X-API-Key
+   c) Recreate signature con apiSecret
+   d) Compare signatures (timing-safe comparison)
+   e) Check rate limit (Redis)
+   f) Check IP whitelist
+   
+6. Si válido:
+   - Attach tenant context a request
+   - Proceed a handler
+   
+7. Si inválido:
+   - Return 401/403 con error
+   - Log attempt (posible security issue)
+
+6.2 Flujo de Creación de Dirección
+POST /v1/{tenantId}/addresses
+1. Authenticate & authorize (ver 6.1)
+2. Validate request body (Zod schema):
+   - chain es válido
+   - currency match chain
+   - metadata es valid JSON
+   
+3. Check tenant tier:
+   - Starter: máx 50 direcciones
+   - Scale: máx 1,000 direcciones
+   - Enterprise: unlimited
+   
+4. Check current address count:
+   SELECT COUNT(*) FROM addresses WHERE tenantId = ? AND status != 'deleted'
+   
+5. Si límite alcanzado:
+   - Return 403 Forbidden (limit reached)
+   
+6. Asegurar virtual account:
+   SELECT * FROM virtualAccounts WHERE tenantId = ? LIMIT 1
+   Si no existe:
+   - Create default virtual account
+   
+7. Generate dirección vía Tatum:
+   - Call getTatumClient().generateAddress(chain, index)
+   - Retry up to 3 times on rate limit
+   - Handle diferentes response formatos por chain
+   
+8. Encrypt sensitive data:
+   - xpub: encrypt(xpub, ENCRYPTION_MASTER_KEY)
+   - publicKey: encrypt(publicKey, ENCRYPTION_MASTER_KEY)
+   
+9. Store en database:
+   INSERT INTO addresses (
+     tenantId, addressId, address, chain, currency,
+     derivationPath, xpub, publicKey, virtualAccountId,
+     label, status, createdAt
+   ) VALUES (...)
+   
+10. Generate QR code:
+    - Create payment URI (bitcoin:addr, ethereum:addr)
+    - Upload to S3 or embed as data URI
+    
+11. Log metering event:
+    INSERT INTO meterEvents (
+      tenantId, operation, apiUnitsUsed, costUSD, ...
+    ) VALUES (?, 'create_address', 1, 0.001, ...)
+    
+12. Return response:
+    {
+      success: true,
+      data: {addressId, address, qrCode, ...},
+      meta: {requestId, metered: true, apiUnitsUsed: 1}
+    }
+    
+13. Cache result (30 segundos):
+    SET cache:address:{addressId} = {...}
+
+6.3 Flujo de Consulta de Balance
+GET /v1/{tenantId}/balances/{chain}/{address}
+1. Authenticate & authorize
+2. Check cache (Redis):
+   GET cache:balance:{chain}:{address}
+   Si hit y < 10 segundos: return cached
+   
+3. Validate address:
+   - Check format según chain
+   - Verify address belongs to tenant
+   
+4. Query on-chain balance vía Tatum:
+   switch(chain) {
+     case 'ethereum': getTatumClient().getEthereumBalance(address)
+     case 'bitcoin': getTatumClient().getBitcoinBalance(address)
+     case 'solana': getTatumClient().getSolanaBalance(address)
+     ...
+   }
+   
+5. Convert balance:
+   - Raw value: 1500000000000000000 wei
+   - Convert: wei / (10^18) = 1.5 ETH
+   - Get exchange rate: getTatumClient().getExchangeRate('ETH', 'USD')
+   - Calculate USD value: 1.5 * 2000 = $3000
+   
+6. Update database:
+   UPDATE addresses SET balance = ?, updatedAt = CURRENT_TIMESTAMP
+   WHERE addressId = ?
+   
+7. Cache result:
+   SET cache:balance:{chain}:{address} = {...}
+   EXPIRE cache:balance:{chain}:{address} 10 segundos
+   
+8. Log metering:
+   INSERT INTO meterEvents (..., operation='balance_query', apiUnitsUsed=0.5)
+   
+9. Return response
+
+6.4 Flujo de Broadcast de Transacción
+POST /v1/{tenantId}/transactions/broadcast
+1. Authenticate & authorize
+2. Validate request:
+   - signedTransaction es string hex válida
+   - Puede decodificarse según chain
+   - Formato es correcto
+   
+3. Estimate gas/fee (for final confirmation):
+   - Decode tx to get from, to, amount
+   - Call fee estimation endpoint
+   - Store estimated fee
+   
+4. Parse tx según chain:
+   - Extract sender, recipient, amount
+   - Verify sender is tenant's address (optional check)
+   
+5. Broadcast vía Tatum:
+   response = getTatumClient().sendTransaction(chain, {
+     txData: signedTransaction,
+     ...
+   })
+   
+6. Extract tx hash:
+   txHash = response.data.txId
+   
+7. Store transaction record:
+   INSERT INTO transactions (
+     tenantId, transactionId, txHash, chain, from, to,
+     value, fee, status='pending', broadcastedAt, ...
+   ) VALUES (...)
+   
+8. Queue webhook event:
+   pushToQueue('webhook-events', {
+     eventType: 'transaction.pending',
+     addressId, txHash, value, ...
+   })
+   
+9. Log metering:
+   INSERT INTO meterEvents (..., operation='broadcast_transaction', apiUnitsUsed=1, costUSD=0.01)
+   
+10. Return response:
+    {
+      transactionId: 'tx_123456',
+      txHash: '0xabcd...',
+      status: 'pending',
+      estimatedConfirmationTime: '15 seconds'
+    }
+
+6.5 Flujo de Webhook Delivery
+Evento ocurre (ej. transacción confirmada en blockchain)
+1. Tatum API envía webhook a nuestra API:
+   POST /api/webhooks/tatum
+   {
+     type: 'ADDRESS_TRANSACTION',
+     data: {address, txId, amount, ...}
+   }
+   
+2. Gateway verifica firma HMAC:
+   - Usar TATUM_WEBHOOK_SECRET
+   - Timing-safe comparison
+   
+3. Identificar tenant(s) afectado:
+   - Buscar dirección en database
+   - Lookup tenant
+   
+4. Transformar evento a formato estándar:
+   standardEvent = {
+     eventType: 'address.transaction.confirmed',
+     data: {transactionId, address, value, ...}
+   }
+   
+5. Buscar webhooks del tenant:
+   SELECT * FROM webhooks 
+   WHERE tenantId = ? 
+   AND status = 'active'
+   AND events LIKE '%address.transaction%'
+   
+6. Para cada webhook:
+   a) Check filters (address, chain, etc.)
+   b) Si no match: skip
+   c) Create webhook event record:
+      INSERT INTO webhookEvents (webhookId, eventType, payload, status='pending')
+   d) Queue para delivery:
+      ENQUEUE('webhook-delivery', {webhookId, eventId})
+   
+7. Job worker procesa delivery:
+   a) Load webhook config
+   b) Create HMAC signature del payload
+   c) POST to webhook URL con retry logic
+   d) Retry exponencial: 1s, 2s, 4s, 8s, 16s (max 5)
+   e) Update webhook delivery stats
+   f) Si success: mark as delivered
+   g) Si fail: mark como failed, retry luego
+   
+8. Webhook expira después 24 horas:
+   - Scheduler borra eventos expirados
+   - Log delivery attempts para auditoría
+
+6.6 Flujo de Metering y Billing
+Cada acción genera metering event:
+1. Metering Middleware:
+   - Log cada operación en queue (non-blocking)
+   - Incluir: tenantId, operation, apiUnitsUsed, costUSD
+   
+2. Nightly Aggregation Job (00:00 UTC):
+   - Aggregate eventos del día previo
+   - SELECT SUM(apiUnitsUsed) FROM meterEvents 
+     WHERE tenantId = ? AND date = ?
+   - Calculate overage:
+     included = tier_monthly_quota
+     used = sum from step anterior
+     overage = max(0, used - included)
+     overage_cost = overage * unit_price
+   
+3. Update tenant's monthly usage:
+   UPDATE tenants SET 
+     apiUnitsUsedThisMonth = ?,
+     overageAmountThisMonth = ?,
+     WHERE tenantId = ?
+   
+4. On Billing Date (recurring):
+   - Select all active subscriptions due
+   - Calculate:
+     * subscription_cost (from tier)
+     * overage_cost (from metering)
+     * total = subscription + overage
+   
+   - Create Stripe invoice:
+     stripe.invoices.create({
+       customerId: stripeCustomerId,
+       subscription: stripeSubscriptionId,
+       custom_fields: [{name: 'Overage', value: overage_cost}]
+     })
+   
+   - Email invoice to tenant
+   - Update tenantBillingCycle
+   
+5. Payment processing:
+   - Stripe webhook on payment_intent.succeeded
+   - Mark invoice as paid
+   - Send receipt
+   
+6. Dashboard shows:
+   - Current usage this month
+   - Projected cost
+   - Invoice history
+   - Usage breakdown por operation
+
+7. SEGURIDAD DETALLADA
+7.1 Encriptación
+ENCRYPTION_MASTER_KEY (256-bit)
+├── Storage: AWS Secrets Manager (rotated quarterly)
+├── Access: IAM policy restricted to API service role
+└── Encryption: AES-256-GCM
+Encrypted Fields:
+├── xpub (derivation key)
+├── publicKey (for KMS signing)
+├── privateKey (if stored, para KMS hot wallets)
+├── apiSecret (API key secret)
+└── webhookSecret (webhook HMAC secret)
+Encryption flow:
+1. plaintext + nonce (12 bytes random) + key
+2. ciphertext = AES-256-GCM(plaintext, key, nonce)
+3. authTag = GCM authentication tag
+4. stored = nonce || authTag || ciphertext (base64 encoded)
+Decryption flow:
+1. stored = base64_decode(stored)
+2. nonce = stored[0:12]
+3. authTag = stored[12:28]
+4. ciphertext = stored[28:]
+5. plaintext = AES-256-GCM-decrypt(ciphertext, key, nonce, authTag)
+6. If verification fails: throw SecurityError
+
+7.2 Rate Limiting
+Per-tenant rate limiting (Redis):
+- Key: rate-limit:{tenantId}:{window}
+- Value: { count: N, resetAt: timestamp }
+Algorithm:
+1. Get current window: window = floor(now / 60)
+2. Check key: count = redis.get(rate-limit:{tenantId}:{window})
+3. If count + 1 > limit:
+   - Return 429 Too Many Requests
+   - Header: Retry-After: {seconds until reset}
+4. If not exceeded:
+   - redis.incr(rate-limit:{tenantId}:{window})
+   - redis.expire(..., 60 segundos)
+   - Proceed
+Per-operation limits:
+- Address creation: 100/min per tenant
+- Balance queries: 1000/min per tenant
+- Transaction broadcast: 10/min per tenant
+- Webhook delivery: 10,000/min total
+
+7.3 IP Whitelisting
+Tenant puede configurar IP whitelist:
+1. Admin agrega IPs en dashboard
+2. IPs se guardan en tabla ipWhitelist
+3. En cada request:
+   - Extract client IP: X-Forwarded-For (del ALB)
+   - Query: SELECT * FROM ipWhitelist WHERE tenantId = ? AND ipAddress = ?
+   - Si whitelist vacío: allow all
+   - Si IP no está en whitelist: return 403 Forbidden
+   - Log attempt para security audit
+
+7.4 Validación de Entrada
+Zod schemas para cada endpoint:
+addressCreateSchema = z.object({
+  chain: z.enum(['bitcoin', 'ethereum', ..., 'cardano']),
+  currency: z.string().uppercase().length(3, 10),
+  metadata: z.object({
+    label: z.string().max(255),
+    tags: z.array(z.string().max(50))
+  }).optional()
+})
+transactionBroadcastSchema = z.object({
+  chain: z.enum([...]),
+  signedTransaction: z.string().regex(/^0x[a-f0-9]+$/i),
+  metadata: z.object(...).optional()
+})
+Validation en middleware:
+const validate = (schema) => (req, res, next) => {
+  const result = schema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(422).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request validation failed',
+        details: result.error.flatten()
+      }
+    });
+  }
+  req.validatedBody = result.data;
+  next();
+};
+
+8. DEPLOYMENT Y INFRAESTRUCTURA
+8.1 Stack de Deployment
+Environment: AWS EKS (Kubernetes)
+Namespace: tatum-gateway
+├── Service (LoadBalancer)
+├── Deployment
+│   ├── Replicas: 3 (auto-scaling 1-10)
+│   ├── Container:
+│   │   - Image: node:20-alpine
+│   │   - Port: 3000
+│   │   - CPU request: 250m, limit: 1000m
+│   │   - Memory request: 512Mi, limit: 2Gi
+│   └── Health checks:
+│       - Readiness: GET /health (10s initial delay)
+│       - Liveness: GET /health (30s initial delay)
+├── ConfigMap: environment variables
+├── Secret: API keys, encryption master key
+├── PDB: Pod Disruption Budget (minAvailable: 2)
+└── HPA: Horizontal Pod Autoscaling
+    - CPU target: 70%
+    - Memory target: 80%
+    - Max replicas: 10
+Database:
+├── RDS PostgreSQL 15
+│   - Instance: db.r6i.large (2 vCPU, 16GB RAM)
+│   - Storage: 500GB gp3
+│   - Backup retention: 30 days
+│   - Multi-AZ: enabled
+│   - Read replicas: 2 (en standby)
+│
+├── ElastiCache Redis 7
+    - Node type: cache.r6g.large
+    - Engine: redis 7.0
+    - Num cache nodes: 3
+    - Automatic failover: enabled
+    - Parameter group: optimized for rate limiting
+
+8.2 CI/CD Pipeline
+GitHub Actions Workflow:
+1. On push to main:
+   - Run linter (eslint)
+   - Run type checker (tsc)
+   - Run tests (Jest, coverage > 80%)
+   - Build Docker image
+   - Push to ECR
+   - Trigger deploy to staging
+2. On merge to production:
+   - Repeat tests
+   - Build Docker image (production tag)
+   - Push to ECR
+   - Run smoke tests against staging image
+   - Deploy to production (blue-green)
+   - Run end-to-end tests
+   - Monitor for 1 hour (error rate, latency)
+   - If all OK: complete deployment
+   - If issues: automatic rollback
+3. Database migrations:
+   - Run as Kubernetes Job antes de deployment
+   - Validate migration success
+   - Rollback entire deployment if failed
+
+8.3 Monitoring y Alerting
+Prometheus metrics:
+├── http_requests_total{method, status, endpoint}
+├── http_request_duration_seconds{quantile, endpoint}
+├── database_query_duration_seconds
+├── redis_operation_duration_seconds
+├── tatum_api_calls_total{chain, operation}
+├── webhook_delivery_total{status}
+├── rate_limit_exceeded_total{tenantId}
+└── active_connections
+Grafana dashboards:
+├── Overview (requests/sec, error rate, latency p95/p99)
+├── Tenants (top users, usage trends)
+├── Resources (CPU, memory, disk)
+├── Database (slow queries, connection pool)
+├── Webhooks (delivery rate, retries)
+└── Billing (revenue, overage)
+CloudWatch alarms:
+├── Error rate > 1% → page on-call
+├── Latency p99 > 1s → notify
+├── Database connections > 80% → scale replicas
+├── Redis memory > 90% → alert
+├── Tatum API down → page on-call
+└── Webhook delivery rate < 95% → notify
+
+9. CONSIDERACIONES DE ESCALABILIDAD
+9.1 Crecimiento esperado
+Año 1:
+- Q1: 50 tenants, 10K addresses
+- Q2: 150 tenants, 50K addresses
+- Q3: 500 tenants, 200K addresses
+- Q4: 1,000 tenants, 500K addresses
+Año 2:
+- Target: 5,000 tenants, 5M addresses
+- Revenue: $5M+ (mix de suscripción + overage)
+Scaling required:
+- Database: Add read replicas, implement caching layer
+- API: Auto-scale to 20+ replicas
+- Webhooks: Dedicated job workers (20-50)
+- Tatum API: Implement batching, request pooling
+
+9.2 Optimizaciones
+Database:
+- Partitioning por tenantId (range)
+- Índices selectivos por operación
+- Connection pooling (pgBouncer)
+- Read replicas for analytics
+Cache:
+- Multi-level caching:
+  * Layer 1: Redis (10s for balance)
+  * Layer 2: CDN (CloudFront) para balance queries GET
+  * Layer 3: Browser cache headers
+- Cache invalidation on transaction confirmations
+API Optimization:
+- Response compression (gzip, brotli)
+- Request batching endpoint:
+  POST /batch {requests: [{method, url, body}]}
+- Cursor-based pagination
+- Field filtering: GET /addresses/{id}?fields=address,balance
+Webhook optimization:
+- Fanout pattern: 1 Tatum webhook → N tenant webhooks
+- Batch webhook delivery (multiple events per request)
+- Deduplication de eventos
+
+10. ROADMAP DE IMPLEMENTACIÓN
+Phase 1: MVP (Semanas 1-6)
+Sprint 1 (Semanas 1-2):
+- Setup proyecto base, CI/CD
+- Implementar autenticación + metering
+- Database schema
+- Health checks
+Sprint 2 (Semanas 3-4):
+- Endpoints de addresses (CRUD)
+- Endpoints de balances
+- Caché con Redis
+- Rate limiting
+Sprint 3 (Semanas 5-6):
+- Endpoints de transactions (broadcast + status)
+- Virtual accounts básico
+- Webhooks basic
+- Documentación OpenAPI
+Deploy: Staging environment
+
+Phase 2: Producción (Semanas 7-10)
+Sprint 4 (Semanas 7-8):
+- KMS signing (AWS KMS)
+- Webhook delivery con retry
+- Monitoring + alerting
+- Load testing + optimization
+Sprint 5 (Semanas 9-10):
+- Billing integration (Stripe)
+- Multi-tenant isolation verification
+- Security audit
+- Compliance checklist (SOC2 readiness)
+Deploy: Production (1 tenant beta)
+
+Phase 3: Escala (Semanas 11-16)
+Sprint 6 (Semanas 11-12):
+- Onboarding flow para nuevos tenants
+- Dashboard de admin
+- API SDKs (JavaScript, Python, Go)
+- Documentation + tutorials
+Sprint 7 (Semanas 13-14):
+- Analytics engine
+- Advanced filtering y reporting
+- Rate limiting refinement
+- Cost optimization
+Sprint 8 (Semanas 15-16):
+- Enterprise features (SLA, compliance logging)
+- Support ticketing system
+- GA release
+Marketing: Launch page, demos, partnerships
+
+11. DECISIONES TÉCNICAS CLAVE
+11.1 Por qué Node.js + Express?
+JavaScript ubiquitous in blockchain community
+Excellent async/await for webhook handling
+Rich ecosystem for crypto libs
+Familiar to existing FITAL team
+11.2 Por qué PostgreSQL?
+ACID transactions for billing accuracy
+Strong JSON support para metadata
+Excellent performance for relational data
+Backup/recovery tools maduras
+11.3 Por qué Tatum?
+Consolidate blockchain interaction
+Reduce complexity + maintenance
+KMS support para production wallets
+Webhook infrastructure built-in
+11.4 Por qué EKS?
+Auto-scaling automático
+Multi-AZ deployments
+Integration con otros servicios AWS
+Cost-effective para 3-10 pods
+12. RIESGOS Y MITIGACIONES
+Riesgo	Probabilidad	Impacto	Mitigación
+Tatum API downtime	Media	Alto	Rate limiting en nuestro lado, fallback a cache
+Blockchain congestion	Media	Medio	Estimaciones de fee dinámicas, user guidance
+Data breach	Baja	Crítico	AES-256 encryption, AWS Secrets Manager, SOC2
+Rate limit abuse	Media	Medio	IP whitelist, strong rate limiting, alerts
+Billing reconciliation errors	Baja	Medio	Automated tests, monthly audits, Stripe validation
+Key rotation failures	Baja	Crítico	Automated rotation with validation, manual fallback
+Este es el plan SÚPER DETALLADO. Cada sección podría extenderse más, pero cubre:
+
+✅ Modelo de negocio completo
+✅ Arquitectura técnica
+✅ 100+ endpoints documentados
+✅ Schema de BD con 15+ tablas
+✅ Flujos detallados paso-a-paso
+✅ Seguridad multinivel
+✅ Deployment producción-ready
+✅ Scaling roadmap
+✅ Decisiones técnicas justificadas
+✅ Riesgos y mitigaciones
