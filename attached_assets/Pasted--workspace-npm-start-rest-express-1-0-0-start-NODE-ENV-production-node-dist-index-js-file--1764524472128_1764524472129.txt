@@ -1,0 +1,23 @@
+~/workspace$ npm start
+
+> rest-express@1.0.0 start
+> NODE_ENV=production node dist/index.js
+
+file:///home/runner/workspace/dist/index.js:1
+var D8=Object.create;var El=Object.defineProperty;var F8=Object.getOwnPropertyDescriptor;var $8=Object.getOwnPropertyNames;var U8=Object.getPrototypeOf,z8=Object.prototype.hasOwnProperty;var U=(t=>typeof require<"u"?require:typeof Proxy<"u"?new Proxy(t,{get:(e,r)=>(typeof require<"u"?require:e)[r]}):t)(function(t){if(typeof require<"u")return require.apply(this,arguments);throw Error('Dynamic require of "'+t+'" is not supported')});var F=(t,e)=>()=>(t&&(e=t(t=0)),e);var j=(t,e)=>()=>(e||t((e={exports:{}}).exports,e),e.exports),Ha=(t,e)=>{for(var r in e)El(t,r,{get:e[r],enumerable:!0})},Q8=(t,e,r,n)=>{if(e&&typeof e=="object"||typeof e=="function")for(let i of $8(e))!z8.call(t,i)&&i!==r&&El(t,i,{get:()=>e[i],enumerable:!(n=F8(e,i))||n.enumerable});return t};var ji=(t,e,r)=>(r=t!=null?D8(U8(t)):{},Q8(e||!t||!t.__esModule?El(r,"default",{value:t,enumerable:!0}):r,t));var Tr=j((xq,fv)=>{var V8=U("path").relative;fv.exports=Z8;var W8=process.cwd();function pv(t,e){for(var r=t.split(/[ ,]+/),n=String(e).toLowerCase(),i=0;i<r.length;i++){var a=r[i];if(a&&(a==="*"||a.toLowerCase()===n))return!0}return!1}function G8(t,e,r){var n=Object.getOwnPropertyDescriptor(t,e),i=n.value;return n.get=function(){return i},n.writable&&(n.set=function(o){return i=o}),delete n.value,delete n.writable,Object.defineProperty(t,e,n),n}function K8(t){for(var e="",r=0;r<t;r++)e+=", arg"+r;return e.substr(2)}function H8(t){var e=this.name+": "+this.namespace;this.message&&(e+=" deprecated "+this.message);for(var r=0;r<t.length;r++)e+=`
+                                                                                                                                                                                                                                                                                                                                                                                             ^
+
+Error: Dynamic require of "path" is not supported
+    at file:///home/runner/workspace/dist/index.js:1:382
+    at file:///home/runner/workspace/dist/index.js:1:904
+    at file:///home/runner/workspace/dist/index.js:1:493
+    at file:///home/runner/workspace/dist/index.js:20:17957
+    at file:///home/runner/workspace/dist/index.js:1:493
+    at file:///home/runner/workspace/dist/index.js:63:582
+    at file:///home/runner/workspace/dist/index.js:1:493
+    at file:///home/runner/workspace/dist/index.js:63:1653
+    at file:///home/runner/workspace/dist/index.js:1:493
+    at file:///home/runner/workspace/dist/index.js:78:11079
+
+Node.js v20.19.3
+~/workspace$ 

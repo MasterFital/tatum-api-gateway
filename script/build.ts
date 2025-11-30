@@ -45,6 +45,13 @@ async function buildAll() {
     ...Object.keys(pkg.devDependencies || {}),
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+  
+  // Add Node.js built-in modules as external to prevent bundling conflicts
+  const nodeBuiltins = [
+    "path", "fs", "http", "https", "url", "util", "stream", "events",
+    "crypto", "os", "buffer", "querystring", "zlib", "assert", "cluster"
+  ];
+  const allExternals = [...new Set([...externals, ...nodeBuiltins])];
 
   await esbuild({
     entryPoints: ["server/index.ts"],
@@ -56,7 +63,7 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: externals,
+    external: allExternals,
     logLevel: "info",
   });
 }
