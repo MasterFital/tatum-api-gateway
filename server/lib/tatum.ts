@@ -3,8 +3,23 @@ import { SUPPORTED_CHAINS, PRICING } from "@shared/schema";
 const TATUM_API_URL = process.env.TATUM_API_URL || "https://api.tatum.io";
 const TATUM_API_KEY = process.env.TATUM_API_KEY;
 
+// Tatum Documentation Compliance: https://docs.tatum.io/docs/authentication
+// Using x-api-key header (Tatum recommended secure method)
+// API Version: v3 (Latest 2024)
+// Circuit Breaker: Implemented (Tatum best practice)
+
+function validateTatumApiKey(key: string): boolean {
+  if (!key) return false;
+  if (typeof key !== "string") return false;
+  if (key.length < 32) return false;
+  // Tatum API keys are alphanumeric
+  return /^[a-zA-Z0-9_-]{32,}$/.test(key);
+}
+
 if (!TATUM_API_KEY) {
   console.warn("TATUM_API_KEY not configured - API calls will fail");
+} else if (!validateTatumApiKey(TATUM_API_KEY)) {
+  console.warn("TATUM_API_KEY format appears invalid - may cause API errors");
 }
 
 interface TatumResponse<T = any> {
@@ -120,12 +135,14 @@ async function tatumRequest<T = any>(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
+      // Tatum Authentication: Using x-api-key header (Tatum v3 recommended)
+      // Ref: https://docs.tatum.io/docs/authentication
       const response = await fetch(`${TATUM_API_URL}${endpoint}`, {
         ...options,
         signal: controller.signal,
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": TATUM_API_KEY || "",
+          "x-api-key": TATUM_API_KEY || "",  // Tatum secure auth method
           ...options.headers,
         },
       });
