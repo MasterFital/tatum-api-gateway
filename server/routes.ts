@@ -28,6 +28,8 @@ import {
 } from "@shared/schema";
 import { KMS } from "./lib/kms";
 import { encrypt, decrypt } from "./lib/encryption";
+import { sql } from "drizzle-orm";
+import { webcrypto } from "crypto";
 
 const CreateTenantSchema = z.object({
   name: z.string().min(2),
@@ -541,16 +543,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       };
 
       if (tatumHealth.success && tatumHealth.data) {
-        testStatus.blockchainInfo = {
-          chain: tatumHealth.data.chain,
-          blocks: tatumHealth.data.blocks,
-          mempool: tatumHealth.data.mempool,
+        (testStatus as any).blockchainInfo = {
+          chain: (tatumHealth.data as any).chain,
+          blocks: (tatumHealth.data as any).blocks,
+          mempool: (tatumHealth.data as any).mempool,
         };
       }
 
       if (tatumHealth.error) {
-        testStatus.error = tatumHealth.error;
-        testStatus.statusCode = tatumHealth.statusCode;
+        (testStatus as any).error = tatumHealth.error;
+        (testStatus as any).statusCode = tatumHealth.statusCode;
       }
 
       res.json({
@@ -689,7 +691,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         apiKeyPrefix,
         apiKeyHash,
         hmacSecret: generateHmacSecret(),
-        allowedChains: tierLimits.chains as string[],
+        allowedChains: [...tierLimits.chains],
         maxAddresses: tierLimits.maxAddresses,
         maxWebhooks: tierLimits.maxWebhooks,
         maxVirtualAccounts: tierLimits.maxVirtualAccounts,
@@ -2518,6 +2520,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Setup fee: $500
         const setupFee = 500;
 
+        const randomBytes = (size: number) => {
+          const buf = new Uint8Array(size);
+          webcrypto.getRandomValues(buf);
+          return Buffer.from(buf).toString("hex");
+        };
+
         const token = {
           id: crypto.randomUUID(),
           tenantId: req.tenant!.id,
@@ -2528,7 +2536,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           totalSupply: data.totalSupply,
           issuerName: data.issuerName,
           description: data.description,
-          smartContractAddress: `0x${crypto.randomBytes(20).toString("hex")}`,
+          smartContractAddress: `0x${randomBytes(20)}`,
           status: "created",
           setupFee,
           annualFee: 200,
@@ -2722,6 +2730,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const amount = parseFloat(data.amount);
         const commission = amount * 0.005; // 0.5% trading commission
 
+        const randomBytes = (size: number) => {
+          const buf = new Uint8Array(size);
+          webcrypto.getRandomValues(buf);
+          return Buffer.from(buf).toString("hex");
+        };
+
         const transfer = {
           id: crypto.randomUUID(),
           tokenId: req.params.tokenId,
@@ -2731,7 +2745,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           commission: commission.toFixed(8),
           commissionUsd: (commission * 1000).toFixed(2), // Mock price
           status: "completed",
-          txHash: `0x${crypto.randomBytes(32).toString("hex")}`,
+          txHash: `0x${randomBytes(32)}`,
           executedAt: new Date().toISOString(),
         };
 
