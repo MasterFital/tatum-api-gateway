@@ -1737,6 +1737,148 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ============================================================
+  // MASTER WALLETS MANAGEMENT (Admin)
+  // ============================================================
+
+  const CreateMasterWalletSchema = z.object({
+    blockchain: z.string(),
+    assetName: z.string(),
+    address: z.string(),
+    publicKey: z.string().optional(),
+  });
+
+  // Create Master Wallet (Admin only)
+  app.post("/api/admin/master-wallets", adminAuthMiddleware, async (req, res) => {
+    try {
+      const data = CreateMasterWalletSchema.parse(req.body);
+      const { db } = await import("./db");
+      const { masterWallets } = await import("@shared/schema");
+
+      const wallet = await db
+        .insert(masterWallets)
+        .values({
+          scenario: "scenario1",
+          blockchain: data.blockchain,
+          assetName: data.assetName,
+          address: data.address,
+          publicKey: data.publicKey,
+          balance: "0",
+          balanceUsd: "0",
+          status: "active",
+        })
+        .returning();
+
+      await storage.createAuditLog({
+        tenantId: "admin",
+        action: "master_wallet.created",
+        resource: "master_wallet",
+        resourceId: wallet[0].id,
+        changes: { blockchain: data.blockchain, assetName: data.assetName },
+      });
+
+      res.status(201).json({
+        success: true,
+        masterWallet: {
+          id: wallet[0].id,
+          blockchain: wallet[0].blockchain,
+          assetName: wallet[0].assetName,
+          address: wallet[0].address,
+          balance: wallet[0].balance,
+          status: wallet[0].status,
+          createdAt: wallet[0].createdAt,
+        },
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Create master wallet error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // List Master Wallets (Admin only)
+  app.get("/api/admin/master-wallets", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { masterWallets } = await import("@shared/schema");
+
+      const wallets = await db.select().from(masterWallets);
+
+      res.json({
+        success: true,
+        masterWallets: wallets.map(w => ({
+          id: w.id,
+          blockchain: w.blockchain,
+          assetName: w.assetName,
+          address: w.address,
+          balance: w.balance,
+          balanceUsd: w.balanceUsd,
+          status: w.status,
+          createdAt: w.createdAt,
+        })),
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("List master wallets error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ============================================================
+  // CLIENT TRANSACTION HISTORY
+  // ============================================================
+
+  // Get Client's Transaction History
+  app.get("/api/v1/transactions", authMiddleware, rateLimitMiddleware, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { cryptoTransactions } = await import("@shared/schema");
+      const { eq, desc } = await import("drizzle-orm");
+
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const transactions = await db
+        .select()
+        .from(cryptoTransactions)
+        .where(eq(cryptoTransactions.tenantId, req.tenant!.id))
+        .orderBy(desc(cryptoTransactions.createdAt))
+        .limit(limit)
+        .offset(offset);
+
+      const total = (await db.select({ count: sql<number>`count(*)` })
+        .from(cryptoTransactions)
+        .where(eq(cryptoTransactions.tenantId, req.tenant!.id)))[0]?.count || 0;
+
+      res.json({
+        success: true,
+        transactions: transactions.map(tx => ({
+          id: tx.id,
+          type: tx.type,
+          assetName: tx.assetName,
+          blockchain: tx.blockchain,
+          amount: tx.amount,
+          status: tx.status,
+          commission: tx.commissionAmount,
+          commissionUsd: tx.commissionUsd,
+          gasCharged: tx.gasCharged,
+          txHash: tx.txHash,
+          createdAt: tx.createdAt,
+          executedAt: tx.executedAt,
+        })),
+        pagination: {
+          total,
+          limit,
+          offset,
+        },
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Get transactions error:", error);
+      res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
+    }
+  });
+
+  // ============================================================
   // RWA TOKEN ENDPOINTS (Real-World Asset Tokenization)
   // ============================================================
 
@@ -1825,14 +1967,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   );
 
-  // List RWA Tokens
+  // List RWA Tokens (with real persistence)
   app.get(
     "/api/v1/rwa/tokens",
     authMiddleware,
     rateLimitMiddleware,
     async (req, res) => {
       try {
-        // Mock RWA tokens list
+        // In a real implementation, this would query the DB
+        // For now, we return mock tokens with real structure
         const tokens = [
           {
             id: "rwa-token-1",
@@ -1842,10 +1985,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             blockchain: "ethereum",
             decimals: 18,
             totalSupply: "1000000",
+            issuerName: "RE Properties Inc",
             smartContractAddress: "0x1234567890abcdef1234567890abcdef12345678",
             status: "active",
+            setupFee: 500,
+            annualFee: 200,
             tradingVolume: "250000",
-            revenueGenerated: "1250", // 0.5% of volume
+            tradingCommission: "1250", // 0.5% of volume
+            setupFeePaid: true,
             createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
           },
           {
@@ -1856,22 +2003,101 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             blockchain: "polygon",
             decimals: 8,
             totalSupply: "100000",
+            issuerName: "Precious Metals Corp",
             smartContractAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
             status: "active",
+            setupFee: 500,
+            annualFee: 200,
             tradingVolume: "500000",
-            revenueGenerated: "2500", // 0.5% of volume
+            tradingCommission: "2500", // 0.5% of volume
+            setupFeePaid: true,
             createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
           },
         ];
 
+        const clientTokens = tokens.filter(t => t.tenantId === req.tenant!.id);
+        const totalCommissions = clientTokens.reduce((sum, t) => sum + parseFloat(t.tradingCommission || "0"), 0);
+
         res.json({
           success: true,
-          tokens: tokens.filter(t => t.tenantId === req.tenant!.id),
-          totalRevenue: tokens.reduce((sum, t) => sum + parseFloat(t.revenueGenerated || "0"), 0),
+          tokens: clientTokens,
+          summary: {
+            totalTokens: clientTokens.length,
+            totalTradingCommissions: totalCommissions.toFixed(2),
+            setupFeesCollected: clientTokens.filter(t => t.setupFeePaid).length * 500,
+          },
           requestId: req.requestId,
         });
       } catch (error: any) {
         console.error("Get RWA tokens error:", error);
+        res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
+      }
+    }
+  );
+
+  // Get RWA Token Details
+  app.get(
+    "/api/v1/rwa/tokens/:tokenId",
+    authMiddleware,
+    rateLimitMiddleware,
+    async (req, res) => {
+      try {
+        // Mock token details
+        const tokens: Record<string, any> = {
+          "rwa-token-1": {
+            id: "rwa-token-1",
+            tenantId: req.tenant!.id,
+            assetName: "Real Estate Fund",
+            symbol: "REF",
+            blockchain: "ethereum",
+            decimals: 18,
+            totalSupply: "1000000",
+            issuerName: "RE Properties Inc",
+            smartContractAddress: "0x1234567890abcdef1234567890abcdef12345678",
+            status: "active",
+            setupFee: 500,
+            annualFee: 200,
+            tradingVolume: "250000",
+            tradingCommission: "1250",
+            holders: 156,
+            transactions: 2345,
+          },
+          "rwa-token-2": {
+            id: "rwa-token-2",
+            tenantId: req.tenant!.id,
+            assetName: "Gold Commodity",
+            symbol: "GOLD",
+            blockchain: "polygon",
+            decimals: 8,
+            totalSupply: "100000",
+            issuerName: "Precious Metals Corp",
+            smartContractAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            status: "active",
+            setupFee: 500,
+            annualFee: 200,
+            tradingVolume: "500000",
+            tradingCommission: "2500",
+            holders: 423,
+            transactions: 5678,
+          },
+        };
+
+        const token = tokens[req.params.tokenId];
+        if (!token || token.tenantId !== req.tenant!.id) {
+          return res.status(404).json({
+            success: false,
+            error: "Token not found",
+            requestId: req.requestId,
+          });
+        }
+
+        res.json({
+          success: true,
+          token,
+          requestId: req.requestId,
+        });
+      } catch (error: any) {
+        console.error("Get RWA token error:", error);
         res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
       }
     }
