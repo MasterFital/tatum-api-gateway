@@ -1237,4 +1237,445 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   });
+
+  // ============================================================
+  // CRYPTO GATEWAY API ENDPOINTS
+  // ============================================================
+
+  const InternalSwapSchema = z.object({
+    fromAccountId: z.string().uuid(),
+    toAccountId: z.string().uuid(),
+    assetName: z.string(),
+    blockchain: z.string(),
+    fromAmount: z.string(),
+    toAmount: z.string(),
+    rate: z.number().positive(),
+  });
+
+  const ExternalWithdrawSchema = z.object({
+    fromAccountId: z.string().uuid(),
+    toExternalAddress: z.string().min(20),
+    assetName: z.string(),
+    blockchain: z.string(),
+    amount: z.string(),
+  });
+
+  // Create Virtual Account
+  app.post(
+    "/api/v1/gateway/virtual-accounts",
+    authMiddleware,
+    rateLimitMiddleware,
+    async (req, res) => {
+      try {
+        const { accountType = "crypto" } = req.body;
+        
+        const vaCount = await storage.countVirtualAccountsByTenant(req.tenant!.id);
+        if (req.tenant!.maxVirtualAccounts !== -1 && vaCount >= req.tenant!.maxVirtualAccounts) {
+          return res.status(403).json({
+            success: false,
+            error: `Virtual account limit reached (${req.tenant!.maxVirtualAccounts})`,
+            upgrade: true,
+            requestId: req.requestId,
+          });
+        }
+
+        const { cryptoGateway } = await import("./lib/crypto-gateway");
+        const account = await cryptoGateway.createVirtualAccount(req.tenant!.id, accountType);
+
+        await storage.createAuditLog({
+          tenantId: req.tenant!.id,
+          action: "virtual_account.created",
+          resource: "virtual_account",
+          resourceId: account.id,
+          changes: { accountType },
+          requestId: req.requestId,
+        });
+
+        res.status(201).json({
+          success: true,
+          virtualAccount: {
+            id: account.id,
+            accountType: account.accountType,
+            balances: account.balances,
+            status: account.status,
+            createdAt: account.createdAt,
+          },
+          requestId: req.requestId,
+        });
+      } catch (error: any) {
+        console.error("Create virtual account error:", error);
+        res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
+      }
+    }
+  );
+
+  // Get Virtual Accounts
+  app.get(
+    "/api/v1/gateway/virtual-accounts",
+    authMiddleware,
+    rateLimitMiddleware,
+    async (req, res) => {
+      try {
+        const accounts = await storage.getVirtualAccountsByTenant(req.tenant!.id);
+        
+        res.json({
+          success: true,
+          virtualAccounts: accounts.map(a => ({
+            id: a.id,
+            accountType: a.accountType,
+            balances: typeof a.balances === 'string' ? JSON.parse(a.balances) : a.balances,
+            status: a.status,
+            frozen: a.frozen,
+            createdAt: a.createdAt,
+          })),
+          requestId: req.requestId,
+        });
+      } catch (error: any) {
+        console.error("Get virtual accounts error:", error);
+        res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
+      }
+    }
+  );
+
+  // Get Virtual Account Balance
+  app.get(
+    "/api/v1/gateway/virtual-accounts/:id/balance",
+    authMiddleware,
+    rateLimitMiddleware,
+    async (req, res) => {
+      try {
+        const { cryptoGateway } = await import("./lib/crypto-gateway");
+        const balance = await cryptoGateway.getVirtualAccountBalance(req.params.id);
+
+        res.json({
+          success: true,
+          balance,
+          requestId: req.requestId,
+        });
+      } catch (error: any) {
+        console.error("Get virtual account balance error:", error);
+        res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
+      }
+    }
+  );
+
+  // Internal Swap (Zero gas, 0.5% commission)
+  app.post(
+    "/api/v1/gateway/swap",
+    authMiddleware,
+    rateLimitMiddleware,
+    async (req, res) => {
+      try {
+        const data = InternalSwapSchema.parse(req.body);
+        const { cryptoGateway } = await import("./lib/crypto-gateway");
+
+        const result = await cryptoGateway.internalSwap({
+          tenantId: req.tenant!.id,
+          scenario: "scenario1",
+          ...data,
+        });
+
+        await storage.createAuditLog({
+          tenantId: req.tenant!.id,
+          action: "internal_swap.executed",
+          resource: "crypto_transaction",
+          resourceId: result.txId,
+          changes: {
+            fromAmount: data.fromAmount,
+            toAmount: data.toAmount,
+            commission: result.commission,
+          },
+          requestId: req.requestId,
+        });
+
+        res.json({
+          success: true,
+          swap: result,
+          message: "Internal swap completed - zero gas fees, 0.5% commission applied",
+          requestId: req.requestId,
+        });
+      } catch (error: any) {
+        if (error.name === "ZodError") {
+          return res.status(400).json({
+            success: false,
+            error: "Validation error",
+            details: error.errors,
+            requestId: req.requestId,
+          });
+        }
+        console.error("Internal swap error:", error);
+        res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
+      }
+    }
+  );
+
+  // External Withdraw (with gas markup)
+  app.post(
+    "/api/v1/gateway/withdraw",
+    authMiddleware,
+    rateLimitMiddleware,
+    async (req, res) => {
+      try {
+        const data = ExternalWithdrawSchema.parse(req.body);
+        const { cryptoGateway } = await import("./lib/crypto-gateway");
+
+        const result = await cryptoGateway.externalWithdraw({
+          tenantId: req.tenant!.id,
+          scenario: "scenario1",
+          ...data,
+        });
+
+        await storage.createAuditLog({
+          tenantId: req.tenant!.id,
+          action: "external_withdraw.initiated",
+          resource: "crypto_transaction",
+          resourceId: result.txId,
+          changes: {
+            amount: data.amount,
+            toAddress: data.toExternalAddress,
+            gasCharged: result.gasCharged,
+            gasProfit: result.yourProfit,
+          },
+          requestId: req.requestId,
+        });
+
+        res.json({
+          success: true,
+          withdraw: result,
+          message: "External withdrawal initiated with gas markup applied",
+          requestId: req.requestId,
+        });
+      } catch (error: any) {
+        if (error.name === "ZodError") {
+          return res.status(400).json({
+            success: false,
+            error: "Validation error",
+            details: error.errors,
+            requestId: req.requestId,
+          });
+        }
+        console.error("External withdraw error:", error);
+        res.status(500).json({ success: false, error: error.message, requestId: req.requestId });
+      }
+    }
+  );
+
+  // ============================================================
+  // ADMIN API ENDPOINTS (Gas Configuration & Revenue)
+  // ============================================================
+
+  // Get Gas Settings
+  app.get("/api/admin/gas-settings", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { gasFeeManager } = await import("./lib/gas-fees");
+      const config = await gasFeeManager.loadConfig();
+
+      res.json({
+        success: true,
+        gasSettings: config,
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Get gas settings error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Update Global Gas Markup
+  app.put("/api/admin/gas-settings/global", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { markup } = req.body;
+      if (typeof markup !== "number" || markup < 10 || markup > 100) {
+        return res.status(400).json({
+          success: false,
+          error: "Markup must be a number between 10 and 100",
+        });
+      }
+
+      const { gasFeeManager } = await import("./lib/gas-fees");
+      await gasFeeManager.updateGlobalMarkup(markup, "admin");
+
+      res.json({
+        success: true,
+        message: `Global gas markup updated to ${markup}%`,
+        newMarkup: markup,
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Update gas markup error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Set Client-Specific Gas Markup
+  app.put("/api/admin/gas-settings/client/:clientId", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { markup, reason, expiresAt } = req.body;
+      if (typeof markup !== "number" || markup < 10 || markup > 100) {
+        return res.status(400).json({
+          success: false,
+          error: "Markup must be a number between 10 and 100",
+        });
+      }
+
+      const { gasFeeManager } = await import("./lib/gas-fees");
+      await gasFeeManager.setClientMarkup(
+        req.params.clientId,
+        markup,
+        reason || "Admin override",
+        "admin",
+        expiresAt ? new Date(expiresAt) : undefined
+      );
+
+      res.json({
+        success: true,
+        message: `Client ${req.params.clientId} gas markup set to ${markup}%`,
+        clientId: req.params.clientId,
+        newMarkup: markup,
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Set client gas markup error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Remove Client-Specific Gas Markup
+  app.delete("/api/admin/gas-settings/client/:clientId", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { gasFeeManager } = await import("./lib/gas-fees");
+      await gasFeeManager.removeClientMarkup(req.params.clientId, "admin");
+
+      res.json({
+        success: true,
+        message: `Client ${req.params.clientId} gas markup removed, now using global default`,
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Remove client gas markup error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Get Revenue Metrics
+  app.get("/api/admin/revenue", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { cryptoTransactions } = await import("@shared/schema");
+      const { sql, desc } = await import("drizzle-orm");
+
+      // Get all completed transactions with commissions
+      const transactions = await db
+        .select()
+        .from(cryptoTransactions)
+        .orderBy(desc(cryptoTransactions.createdAt))
+        .limit(1000);
+
+      // Calculate revenue metrics
+      let totalSwapCommissions = 0;
+      let totalGasMarkupRevenue = 0;
+      let totalTransactions = transactions.length;
+      let totalVolume = 0;
+
+      const revenueByType: Record<string, number> = {
+        internal_swap: 0,
+        external_withdraw: 0,
+        external_deposit: 0,
+      };
+
+      const revenueByBlockchain: Record<string, number> = {};
+      const volumeByAsset: Record<string, number> = {};
+
+      for (const tx of transactions) {
+        const amount = parseFloat(tx.amount || "0");
+        const commission = parseFloat(tx.commissionAmount || "0");
+        const gasProfit = parseFloat(tx.gasCharged || "0") - parseFloat(tx.gasReal || "0");
+
+        totalVolume += amount;
+        
+        if (tx.type === "internal_swap") {
+          totalSwapCommissions += commission;
+          revenueByType.internal_swap += commission;
+        } else if (tx.type === "external_withdraw") {
+          totalGasMarkupRevenue += gasProfit > 0 ? gasProfit : 0;
+          revenueByType.external_withdraw += gasProfit > 0 ? gasProfit : 0;
+        }
+
+        // By blockchain
+        revenueByBlockchain[tx.blockchain] = (revenueByBlockchain[tx.blockchain] || 0) + commission + (gasProfit > 0 ? gasProfit : 0);
+
+        // By asset
+        volumeByAsset[tx.assetName] = (volumeByAsset[tx.assetName] || 0) + amount;
+      }
+
+      const totalRevenue = totalSwapCommissions + totalGasMarkupRevenue;
+
+      res.json({
+        success: true,
+        revenue: {
+          total: {
+            allTime: totalRevenue.toFixed(8),
+            swapCommissions: totalSwapCommissions.toFixed(8),
+            gasMarkupRevenue: totalGasMarkupRevenue.toFixed(8),
+          },
+          transactions: {
+            total: totalTransactions,
+            volume: totalVolume.toFixed(8),
+          },
+          breakdown: {
+            byType: revenueByType,
+            byBlockchain: revenueByBlockchain,
+            volumeByAsset,
+          },
+          rates: {
+            swapCommissionRate: "0.5%",
+            defaultGasMarkup: "40%",
+          },
+        },
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Get revenue metrics error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Get Recent Transactions (Admin view)
+  app.get("/api/admin/transactions", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { cryptoTransactions } = await import("@shared/schema");
+      const { desc } = await import("drizzle-orm");
+
+      const limit = parseInt(req.query.limit as string) || 50;
+      const transactions = await db
+        .select()
+        .from(cryptoTransactions)
+        .orderBy(desc(cryptoTransactions.createdAt))
+        .limit(limit);
+
+      res.json({
+        success: true,
+        transactions: transactions.map(tx => ({
+          id: tx.id,
+          tenantId: tx.tenantId,
+          type: tx.type,
+          scenario: tx.scenario,
+          assetName: tx.assetName,
+          blockchain: tx.blockchain,
+          amount: tx.amount,
+          gasReal: tx.gasReal,
+          gasCharged: tx.gasCharged,
+          commissionAmount: tx.commissionAmount,
+          status: tx.status,
+          txHash: tx.txHash,
+          createdAt: tx.createdAt,
+        })),
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      console.error("Get admin transactions error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
 }
