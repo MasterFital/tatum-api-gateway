@@ -29,7 +29,7 @@ export async function seedDemoData() {
     apiKeyPrefix,
     apiKeyHash,
     hmacSecret: generateHmacSecret(),
-    allowedChains: tierLimits.chains as string[],
+    allowedChains: [...(tierLimits.chains as readonly string[])],
     maxAddresses: tierLimits.maxAddresses,
     maxWebhooks: tierLimits.maxWebhooks,
     maxVirtualAccounts: tierLimits.maxVirtualAccounts,
