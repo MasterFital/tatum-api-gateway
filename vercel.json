@@ -1,9 +1,7 @@
 {
   "version": 2,
   "buildCommand": "npm run build",
-  "startCommand": "npm start",
   "installCommand": "npm install",
-  "outputDirectory": "",
   "env": {
     "NODE_ENV": "production"
   },
@@ -16,6 +14,5 @@
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type, x-api-key, x-admin-key, Authorization" }
       ]
     }
-  ],
-  "crons": []
+  ]
 }
