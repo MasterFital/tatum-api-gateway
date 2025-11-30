@@ -2,34 +2,12 @@ import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
 
-// server deps to bundle to reduce openat(2) syscalls
-// which helps cold start times
-const allowlist = [
-  "@google/generative-ai",
-  "@neondatabase/serverless",
-  "axios",
-  "connect-pg-simple",
-  "cors",
-  "date-fns",
-  "drizzle-orm",
-  "drizzle-zod",
-  "express",
-  "express-rate-limit",
-  "express-session",
-  "jsonwebtoken",
-  "memorystore",
-  "multer",
-  "nanoid",
-  "nodemailer",
-  "openai",
-  "passport",
-  "passport-local",
-  "stripe",
-  "uuid",
-  "ws",
-  "xlsx",
-  "zod",
-  "zod-validation-error",
+// Mark all dependencies as external to prevent bundling issues with dynamic requires in ESM
+// Node.js will load everything from node_modules at runtime
+const nodeBuiltins = [
+  "path", "fs", "http", "https", "url", "util", "stream", "events",
+  "crypto", "os", "buffer", "querystring", "zlib", "assert", "cluster",
+  "child_process", "process", "net", "tls", "dgram", "dns", "domain"
 ];
 
 async function buildAll() {
@@ -44,14 +22,9 @@ async function buildAll() {
     ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.devDependencies || {}),
   ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
   
-  // Add Node.js built-in modules as external to prevent bundling conflicts
-  const nodeBuiltins = [
-    "path", "fs", "http", "https", "url", "util", "stream", "events",
-    "crypto", "os", "buffer", "querystring", "zlib", "assert", "cluster"
-  ];
-  const allExternals = [...new Set([...externals, ...nodeBuiltins])];
+  // Mark all packages + Node.js builtins as external to avoid dynamic require issues
+  const allExternals = [...new Set([...allDeps, ...nodeBuiltins])];
 
   await esbuild({
     entryPoints: ["server/index.ts"],
