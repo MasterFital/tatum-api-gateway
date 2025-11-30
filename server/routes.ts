@@ -53,8 +53,6 @@ const CreateWebhookSchema = z.object({
 });
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
-  seedDemoData().catch(console.error);
-
   // Root endpoint - API Gateway info + Model explanation
   app.get("/", (req, res) => {
     res.json({

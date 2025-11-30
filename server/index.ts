@@ -127,6 +127,13 @@ app.get("/", (req, res) => {
       } else {
         log("⚠ WARNING: TATUM_API_KEY not configured");
       }
+      
+      // Seed demo data AFTER server is listening (fire-and-forget)
+      import("./seed").then(({ seedDemoData }) => {
+        seedDemoData().catch(err => {
+          log(`⚠ Demo seed error: ${err.message}`, "seed");
+        });
+      });
     },
   );
 })();
