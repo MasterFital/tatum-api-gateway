@@ -2,6 +2,7 @@
   "version": 2,
   "framework": null,
   "buildCommand": "npm run build",
+  "startCommand": "npm start",
   "installCommand": "npm install",
   "env": {
     "NODE_ENV": "production"
