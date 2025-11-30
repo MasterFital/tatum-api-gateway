@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "framework": null,
   "buildCommand": "npm run build",
   "installCommand": "npm install",
   "env": {
@@ -14,5 +15,6 @@
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type, x-api-key, x-admin-key, Authorization" }
       ]
     }
-  ]
+  ],
+  "crons": []
 }

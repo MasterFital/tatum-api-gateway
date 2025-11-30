@@ -27,7 +27,8 @@ app.use(express.urlencoded({ extended: false }));
 
 // Serve static frontend files in production
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(resolve(__dirname, "../dist/public")));
+  const publicDir = resolve(__dirname, "public");
+  app.use(express.static(publicDir));
 }
 
 export function log(message: string, source = "express") {
