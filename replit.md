@@ -2,7 +2,7 @@
 
 ## Status: ✅ FULLY DEPLOYED & OPERATIONAL
 
-**Live URL**: https://tatum-api-gateway.vercel.app
+**Live URL**: https://tatum-api-gateway-production.up.railway.app
 
 ## Overview
 Enterprise-grade blockchain API gateway supporting 130+ blockchains with multi-tenant architecture, tier-based billing, real-time metering, complete Tatum API v3/v4 integration, and **AES-256-GCM encryption for master wallets**.
@@ -161,25 +161,31 @@ Optional:
 
 ## Deployment
 
-### Vercel (PRODUCTION)
-**Status**: ✅ GitHub synced, ready for deployment
+### Railway (PRODUCTION - ACTIVE)
+**Status**: ✅ Successfully deployed and operational
 
-**Next Step (YOU DO THIS)**:
-1. Go to https://vercel.com/MasterFital/tatum-api-gateway
-2. Find the **latest deployment** 
-3. Click **"Redeploy"** button
-4. Wait 2-3 minutes for build to complete
-5. Test: `curl https://tatum-api-gateway.vercel.app/api/health`
+**Live URL**: https://tatum-api-gateway-production.up.railway.app
 
-**Build Process**:
-- `npm run build` compiles frontend (Vite) + backend (esbuild ESM)
-- Vercel runs `npm start` which launches `node dist/index.js`
-- Express server serves API routes + static frontend files
+**How it works**:
+- GitHub connects to Railway via git webhook
+- Railway runs `npm run build` → compiles frontend + backend (ESM)
+- Railway runs `npm start` → starts `node dist/index.js` on port 5000
+- Express server automatically serves API routes + static SPA frontend
 
-**Environment Variables in Vercel**:
-- All required env vars already configured in dashboard
-- MASTER_KMS_SECRET is set
-- ADMIN_API_KEY is set
+**Test endpoints**:
+```bash
+curl https://tatum-api-gateway-production.up.railway.app/api/health
+curl https://tatum-api-gateway-production.up.railway.app/api/pricing
+curl https://tatum-api-gateway-production.up.railway.app/api/chains
+```
+
+**Environment Variables in Railway**:
+- DATABASE_URL ✅
+- TATUM_API_KEY ✅
+- SESSION_SECRET ✅
+- MASTER_KMS_SECRET ✅
+- ADMIN_API_KEY ✅
+- NODE_ENV=production ✅
 
 ### Production Checklist
 - ✅ GitHub repository fully synced
