@@ -4,6 +4,15 @@
 Enterprise-grade blockchain API gateway supporting 130+ blockchains with multi-tenant architecture, tier-based billing, real-time metering, and complete Tatum API v3/v4 integration.
 
 ## Recent Changes
+- **2025-11-30**: Complete Documentation & Guide
+  - Created TATUM_API_GATEWAY_GUIDE.md - Enterprise-grade guide aligned with Tatum API v3/v4
+  - Created COMPLETE_API_ENDPOINTS.md - All endpoints with real-world examples
+  - Documented full business model (CRYPTO panel + RWA panel revenue streams)
+  - Added circuit breaker pattern and retry logic explanation
+  - Included real-world usage examples and revenue calculations
+  - Step-by-step endpoint usage with curl examples
+  - Admin dashboard guide and configuration instructions
+
 - **2025-11-29**: Security Hardening
   - API keys now stored as hashes only (HMAC-SHA256) - never in plaintext
   - Added API key prefix for identification without exposing full key
@@ -147,8 +156,24 @@ curl -X POST http://localhost:5000/api/admin/tenants/{id}/suspend \
 ## Deployment
 Configured for Vercel deployment via `vercel.json`. Set environment variables in Vercel dashboard.
 
+## Documentation Status
+- **TATUM_API_GATEWAY_GUIDE.md** ✅
+  - Complete guide aligned with Tatum API v3/v4 (https://docs.tatum.io)
+  - Business model explanation (CRYPTO panel + RWA panel)
+  - All 30+ endpoints documented with curl examples
+  - Real-world usage scenarios and revenue calculations
+  - Error handling, resilience patterns, and deployment guide
+  
+- **COMPLETE_API_ENDPOINTS.md** ✅
+  - Reference documentation for all endpoints
+  - Request/response examples for every endpoint
+  - Revenue tracking and admin dashboard guide
+  - Real-world examples of CRYPTO panel and RWA panel usage
+
 ## User Preferences
 - Enterprise B2B styling with IBM Plex fonts
 - Information-dense dashboard UI
 - Dark mode support
 - Monospace for addresses/hashes
+- Documentation aligned with Tatum official API docs
+- Clear business model explanation in all guides
