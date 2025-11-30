@@ -16,6 +16,10 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
+localPort = 34213
+externalPort = 3001
+
+[[ports]]
 localPort = 39275
 externalPort = 3000
 
@@ -45,3 +49,9 @@ waitForPort = 5000
 
 [agent]
 integrations = ["javascript_database:1.0.0", "github:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+MASTER_KMS_SECRET = "$(openssl rand -hex 32)"
+TATUM_APIURL = "https://api.tatum.io"
