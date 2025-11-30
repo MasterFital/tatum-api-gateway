@@ -1,17 +1,23 @@
 # Tatum API Gateway
 
 ## Overview
-Enterprise-grade blockchain API gateway supporting 130+ blockchains with multi-tenant architecture, tier-based billing, real-time metering, and complete Tatum API v3/v4 integration.
+Enterprise-grade blockchain API gateway supporting 130+ blockchains with multi-tenant architecture, tier-based billing, real-time metering, complete Tatum API v3/v4 integration, and **AES-256-GCM encryption for master wallets**.
 
 ## Recent Changes
+- **2025-11-30**: Security Hardening Complete ✅
+  - Implemented AES-256-GCM encryption for master wallet private keys
+  - Added KMS (Key Management System) with PBKDF2-SHA256 key derivation
+  - Created private key decryption endpoint with full audit logging
+  - Added privateKeyAuthTag column for GCM integrity verification
+  - Fixed all TypeScript errors and type safety issues
+  - **All changes committed to GitHub and ready for Vercel deployment**
+
 - **2025-11-30**: Complete Documentation & Guide
   - Created TATUM_API_GATEWAY_GUIDE.md - Enterprise-grade guide aligned with Tatum API v3/v4
   - Created COMPLETE_API_ENDPOINTS.md - All endpoints with real-world examples
   - Documented full business model (CRYPTO panel + RWA panel revenue streams)
   - Added circuit breaker pattern and retry logic explanation
   - Included real-world usage examples and revenue calculations
-  - Step-by-step endpoint usage with curl examples
-  - Admin dashboard guide and configuration instructions
 
 - **2025-11-29**: Security Hardening
   - API keys now stored as hashes only (HMAC-SHA256) - never in plaintext
@@ -22,31 +28,25 @@ Enterprise-grade blockchain API gateway supporting 130+ blockchains with multi-t
   - Demo seeding guarded behind SEED_DEMO_DATA environment variable
   - Tatum client resilience: retry logic with exponential backoff, circuit breaker
 
-- **2025-11-29**: Initial implementation
-  - Complete database schema for multi-tenancy
-  - Tatum API client with all major endpoints
-  - JWT + API Key authentication with HMAC signing
-  - Tier-based rate limiting (Starter/Scale/Enterprise)
-  - Real-time usage metering and billing aggregation
-  - React dashboard with Recharts analytics
-  - Full CRUD for tenants, addresses, webhooks
-
 ## Architecture
 
 ### Security Model
+- **Master Wallet Private Keys**: AES-256-GCM encrypted with KMS-derived keys
+- **Key Management System**: PBKDF2-SHA256 with 100,000 iterations for key derivation
 - **API Keys**: Only SHA-256 hashes stored in database, never plaintext
 - **Key Creation**: Full API key returned ONCE during tenant creation
 - **Key Rotation**: Authenticated endpoint to rotate keys securely
 - **Admin Access**: Separate admin API key for tier changes and account management
 - **HMAC Signing**: Request signing for webhook verification
+- **Audit Logging**: All private key access logged with full context
 
 ### Tech Stack
 - **Frontend**: React + TypeScript + Shadcn UI + Tailwind CSS
-- **Backend**: Express.js + TypeScript
+- **Backend**: Express.js + TypeScript with AES-256-GCM encryption
 - **Database**: PostgreSQL (Neon) + Drizzle ORM
-- **Blockchain**: Tatum API v3/v4
+- **Blockchain**: Tatum API v3/v4 with circuit breaker pattern
 - **Charts**: Recharts
-- **Fonts**: IBM Plex Sans/Mono (Carbon Design inspiration)
+- **Security**: KMS, PBKDF2, AES-256-GCM, HMAC-SHA256
 
 ### Project Structure
 ```
@@ -59,14 +59,17 @@ Enterprise-grade blockchain API gateway supporting 130+ blockchains with multi-t
 ├── server/
 │   ├── lib/
 │   │   ├── tatum.ts        # Tatum API client with retry/circuit breaker
-│   │   ├── auth.ts         # Authentication middleware
-│   │   └── metering.ts     # Usage tracking
-│   ├── routes.ts           # Express API routes
+│   │   ├── auth.ts         # Authentication middleware + API key generation
+│   │   ├── encryption.ts   # AES-256-GCM encryption/decryption
+│   │   ├── kms.ts          # Key Management System (PBKDF2-SHA256)
+│   │   ├── metering.ts     # Usage tracking and billing
+│   │   └── auth.ts         # Authentication middleware
+│   ├── routes.ts           # Express API routes (all endpoints)
 │   ├── storage.ts          # Database interface
 │   ├── seed.ts             # Demo data seeding (dev only)
 │   └── db.ts               # Drizzle connection
 └── shared/
-    └── schema.ts           # Database schemas & types
+    └── schema.ts           # Database schemas & types with encryption fields
 ```
 
 ### API Endpoints
@@ -89,8 +92,15 @@ Enterprise-grade blockchain API gateway supporting 130+ blockchains with multi-t
 - `POST /api/v1/webhooks` - Create webhook
 - `GET /api/v1/usage` - Usage analytics
 - `GET /api/v1/audit-logs` - Audit trail
+- `GET /api/v1/transactions` - Client's transaction history
+- `POST /api/v1/rwa/tokens` - Create RWA token ($500 setup fee)
+- `GET /api/v1/rwa/tokens` - List RWA tokens
+- `POST /api/v1/rwa/tokens/:id/transfer` - Transfer RWA token (0.5% admin commission)
 
 #### Admin Endpoints (x-admin-key header)
+- `POST /api/admin/master-wallets` - Create master wallet with optional private key encryption
+- `GET /api/admin/master-wallets` - List all master wallets
+- `GET /api/admin/master-wallets/:id/private-key` - Decrypt private key (audit logged)
 - `PATCH /api/admin/tenants/:id` - Update any tenant (tier changes)
 - `POST /api/admin/tenants/:id/suspend` - Suspend tenant
 - `POST /api/admin/tenants/:id/activate` - Reactivate tenant
@@ -112,6 +122,7 @@ Required:
 - `DATABASE_URL` - PostgreSQL connection string
 - `TATUM_API_KEY` - Tatum API key
 - `SESSION_SECRET` - Session encryption key
+- `MASTER_KMS_SECRET` - Master secret for KMS (generate with `openssl rand -hex 32`)
 - `ADMIN_API_KEY` - Admin authentication key (generate with `openssl rand -hex 32`)
 
 Optional:
@@ -124,25 +135,29 @@ npm run db:push      # Push schema to database
 npm run build        # Build for production
 ```
 
-### Testing Tenant API
+### Testing Private Key Encryption
 ```bash
-# Create tenant (save the API key - it's only shown once!)
-curl -X POST http://localhost:5000/api/tenants \
+# Create master wallet with private key (auto-encrypted)
+curl -X POST http://localhost:5000/api/admin/master-wallets \
+  -H "x-admin-key: YOUR_ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Test","email":"test@example.com","tier":"starter"}'
+  -d '{
+    "blockchain": "ethereum",
+    "assetName": "ETH",
+    "assetType": "crypto",
+    "address": "0x1234...",
+    "publicKey": "0x5678...",
+    "privateKey": "your_private_key_here"
+  }'
 
-# Use returned API key for authenticated requests
-curl http://localhost:5000/api/v1/addresses \
-  -H "x-api-key: tatum_xxxxx..."
-
-# Rotate API key
-curl -X POST http://localhost:5000/api/tenants/{id}/rotate-key \
-  -H "x-api-key: tatum_xxxxx..."
+# Decrypt private key (requires admin key, audit logged)
+curl -H "x-admin-key: YOUR_ADMIN_KEY" \
+  http://localhost:5000/api/admin/master-wallets/{id}/private-key
 ```
 
 ### Admin Operations
 ```bash
-# Change tenant tier (requires ADMIN_API_KEY set)
+# Change tenant tier
 curl -X PATCH http://localhost:5000/api/admin/tenants/{id} \
   -H "x-admin-key: your_admin_key" \
   -H "Content-Type: application/json" \
@@ -154,21 +169,38 @@ curl -X POST http://localhost:5000/api/admin/tenants/{id}/suspend \
 ```
 
 ## Deployment
-Configured for Vercel deployment via `vercel.json`. Set environment variables in Vercel dashboard.
+
+### Vercel Configuration
+- Configured in `vercel.json`
+- Environment variables already set in Vercel dashboard
+- Auto-deploys on `git push` to main branch
+
+### Production Checklist
+- ✅ GitHub repository synced
+- ✅ All security features implemented
+- ✅ Database schema updated with encryption fields
+- ✅ Audit logging enabled
+- ✅ TypeScript compilation clean
+- ✅ Ready for Vercel deployment
 
 ## Documentation Status
 - **TATUM_API_GATEWAY_GUIDE.md** ✅
-  - Complete guide aligned with Tatum API v3/v4 (https://docs.tatum.io)
+  - Complete guide aligned with Tatum API v3/v4
   - Business model explanation (CRYPTO panel + RWA panel)
-  - All 30+ endpoints documented with curl examples
+  - All endpoints documented with curl examples
   - Real-world usage scenarios and revenue calculations
-  - Error handling, resilience patterns, and deployment guide
   
 - **COMPLETE_API_ENDPOINTS.md** ✅
   - Reference documentation for all endpoints
   - Request/response examples for every endpoint
   - Revenue tracking and admin dashboard guide
   - Real-world examples of CRYPTO panel and RWA panel usage
+
+- **SECURITY_IMPLEMENTATION.md** ✅
+  - AES-256-GCM encryption details
+  - KMS architecture and key derivation
+  - Private key storage and access patterns
+  - Audit logging implementation
 
 ## User Preferences
 - Enterprise B2B styling with IBM Plex fonts
@@ -177,3 +209,4 @@ Configured for Vercel deployment via `vercel.json`. Set environment variables in
 - Monospace for addresses/hashes
 - Documentation aligned with Tatum official API docs
 - Clear business model explanation in all guides
+- Security-first approach to private key management
