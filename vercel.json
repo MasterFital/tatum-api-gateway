@@ -1,10 +1,16 @@
 {
   "version": 2,
   "buildCommand": "npm run build",
-  "startCommand": "npm start",
   "installCommand": "npm install",
+  "outputDirectory": "dist/public",
   "env": {
     "NODE_ENV": "production"
+  },
+  "functions": {
+    "api/index.ts": {
+      "memory": 3008,
+      "maxDuration": 60
+    }
   },
   "headers": [
     {
