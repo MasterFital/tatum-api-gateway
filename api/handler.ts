@@ -1,6 +1,7 @@
 import express from 'express';
 import { registerRoutes } from '../server/routes';
 import { createServer } from 'http';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -25,33 +26,28 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-// Serve static frontend files
-const publicDir = resolve(__dirname, 'dist/public');
-app.use(express.static(publicDir));
-
-// API Gateway Info endpoint
-app.get('/', (req, res) => {
-  res.json({
-    name: 'Tatum API Gateway',
-    version: '1.0.0',
-    description: 'Enterprise-grade blockchain API gateway supporting 130+ blockchains',
-    status: 'running',
-    endpoints: {
-      health: 'GET /api/health',
-      pricing: 'GET /api/pricing',
-      chains: 'GET /api/chains',
-      docs: 'https://github.com/MasterFital/tatum-api-gateway#api-documentation',
-    },
-    docs: 'https://api.tatum.io/docs',
-    github: 'https://github.com/MasterFital/tatum-api-gateway',
-  });
-});
-
 // Initialize routes
 (async () => {
   await registerRoutes(httpServer, app);
 
-  // Fallback handler
+  // Serve static frontend files for non-API routes
+  app.get('/', (req, res) => {
+    try {
+      const indexPath = resolve(__dirname, 'dist/public/index.html');
+      const html = readFileSync(indexPath, 'utf-8');
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    } catch (error) {
+      res.json({
+        name: 'Tatum API Gateway',
+        version: '1.0.0',
+        description: 'Enterprise-grade blockchain API gateway supporting 130+ blockchains',
+        status: 'running',
+      });
+    }
+  });
+
+  // Fallback for other non-API routes
   app.use((req, res) => {
     if (req.path.startsWith('/api')) {
       res.status(404).json({
@@ -60,10 +56,16 @@ app.get('/', (req, res) => {
         message: 'This API endpoint does not exist. See GET / for available endpoints.',
       });
     } else {
-      res.sendFile(resolve(__dirname, 'dist/public/index.html'));
+      try {
+        const indexPath = resolve(__dirname, 'dist/public/index.html');
+        const html = readFileSync(indexPath, 'utf-8');
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+      } catch (error) {
+        res.status(404).json({ error: 'Not found' });
+      }
     }
   });
 })();
 
-// Export for Vercel
 export default app;
