@@ -51,13 +51,15 @@ const CreateWebhookSchema = z.object({
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   seedDemoData().catch(console.error);
 
-  // Root endpoint - API Gateway info
+  // Root endpoint - API Gateway info + Model explanation
   app.get("/", (req, res) => {
     res.json({
       name: "Tatum API Gateway",
       version: "1.0.0",
       description: "Enterprise-grade blockchain API gateway supporting 130+ blockchains",
       status: "running",
+      documentation: "GET /api/docs | GET /api/docs/model | GET /api/docs/examples",
+      quickStart: "1. Get API key from admin | 2. Add 'x-api-key: YOUR_KEY' header | 3. POST /api/tenants to register",
       endpoints: {
         health: "GET /api/health",
         pricing: "GET /api/pricing",
@@ -68,10 +70,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         webhooks: "POST /api/v1/webhooks | GET /api/v1/webhooks",
         gateway: "POST /api/v1/gateway/virtual-accounts | GET /api/v1/gateway/virtual-accounts | POST /api/v1/gateway/swap | POST /api/v1/gateway/withdraw",
         admin: "GET /api/admin/gas-settings | PUT /api/admin/gas-settings/global | GET /api/admin/revenue | GET /api/admin/transactions",
-        docs: "https://github.com/MasterFital/tatum-api-gateway#api-documentation"
+        rwa: "POST /api/v1/rwa/tokens | GET /api/v1/rwa/tokens | POST /api/v1/rwa/tokens/:id/transfer"
       },
       businessModel: {
-        type: "Dual-Panel API Gateway",
+        type: "Dual-Panel API Gateway (100% Admin Revenue)",
         panels: {
           cryptoPanel: {
             description: "Master wallet control with virtual accounts system",
@@ -79,32 +81,488 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               internalSwaps: "0.5% commission (zero gas fees)",
               gasMarkup: "40% configurable markup on gas fees",
               setupFees: "$500 per RWA client"
-            }
+            },
+            annualRevenue: "$204K (Y1) → $1.02M (Y2) → $2.04M (Y3)"
           },
           rwaPanel: {
             description: "Real-world asset tokenization infrastructure",
             revenueStreams: {
-              annualFees: "$200 per client",
-              tradingCommissions: "0.5% of all trading volume",
-              setupFees: "$500 per client"
-            }
+              setupFees: "$500 per token (one-time)",
+              annualFees: "$200 per token per year",
+              tradingCommissions: "0.5% of all trading volume (100% to admin)"
+            },
+            annualRevenue: "$654K (Y1) → $8.07M (Y2) → $60.21M (Y3)"
           }
         },
-        profitMargins: "82-96% net margins",
-        projections: {
-          year1: "$850K",
-          year2: "$9M",
-          year3: "$62M"
+        profitMargins: "82.5% (Y1) → 91.2% (Y2) → 96.8% (Y3)",
+        totalProjections: {
+          year1: "$858K",
+          year2: "$9.09M",
+          year3: "$62.25M"
         }
       },
       auth: {
         type: "API Key + HMAC",
-        headerPrefix: "Bearer <api_key>",
-        hmacEnabled: true
+        method: "x-api-key header (Tatum v3 recommended)",
+        example: "curl -H 'x-api-key: YOUR_API_KEY' https://api.example.com/api/v1/...",
+        documentation: "https://docs.tatum.io/docs/authentication"
       },
       rateLimit: "Per tier: Starter 10/sec, Scale 100/sec, Enterprise 1000/sec",
       docs: "https://api.tatum.io/docs",
-        github: "https://github.com/MasterFital/tatum-api-gateway"
+      github: "https://github.com/MasterFital/tatum-api-gateway"
+    });
+  });
+
+  // Documentation: Complete model explanation
+  app.get("/api/docs/model", (req, res) => {
+    res.json({
+      title: "Tatum API Gateway - Business Model",
+      introduction: "Dual-panel architecture generating 100% admin revenue via Crypto trading and RWA tokenization",
+      
+      panels: {
+        crypto: {
+          name: "CRYPTO Panel (100% Your Revenue)",
+          description: "You control master wallets (BTC, ETH, SOL, MATIC). Clients trade via virtual accounts.",
+          
+          how_it_works: {
+            step1: "Admin creates master wallets via POST /api/admin/master-wallets",
+            step2: "Clients create virtual accounts via POST /api/v1/gateway/virtual-accounts",
+            step3: "Clients can: swap internally (0.5% fee to you) or withdraw externally (40% gas markup)",
+            step4: "Admin tracks all revenue via GET /api/admin/revenue"
+          },
+          
+          revenue_streams: {
+            internal_swaps: {
+              description: "Client trades BTC → ETH",
+              fee: "0.5% of swap amount",
+              gas_cost: "Zero (internal)",
+              admin_profit: "100% of fee",
+              example: "Client swaps 1 ETH → 0.02 BTC | Commission: 0.0001 BTC (100% to admin)"
+            },
+            gas_markup: {
+              description: "Client withdraws crypto to external wallet",
+              fee: "40% markup on actual gas cost",
+              example: "Bitcoin gas: $3 real | You charge: $4.20 | Your profit: $1.20 (40%)"
+            }
+          },
+          
+          projections: {
+            year1: {
+              volume: "1M USD/month average",
+              monthly_swaps: "5K × 0.5% = $25K",
+              monthly_gas: "10K withdrawals × $3 × 40% = $12K",
+              total_monthly: "$17K",
+              annual: "$204K"
+            },
+            year2: {
+              volume: "5M USD/month average",
+              annual: "$1.02M"
+            },
+            year3: {
+              volume: "10M USD/month average",
+              annual: "$2.04M"
+            }
+          }
+        },
+        
+        rwa: {
+          name: "RWA Panel (100% Your Revenue + Fees)",
+          description: "Clients issue tokens. You provide infrastructure. You keep 100% of fees and trading commissions.",
+          
+          how_it_works: {
+            step1: "Client requests token creation: POST /api/v1/rwa/tokens",
+            step2: "You charge $500 setup fee + deploy smart contract",
+            step3: "Token goes live. Clients trade internally (0.5% fee to you)",
+            step4: "Annual $200 maintenance fee per token",
+            step5: "All external withdrawals have 40% gas markup (to you)",
+            step6: "Track revenue via GET /api/admin/rwa-revenue"
+          },
+          
+          revenue_streams: {
+            setup_fees: {
+              description: "One-time fee per token launched",
+              amount: "$500",
+              frequency: "Per token"
+            },
+            annual_fees: {
+              description: "Yearly maintenance per active token",
+              amount: "$200",
+              frequency: "Per token per year"
+            },
+            trading_commissions: {
+              description: "0.5% of all token trading volume (100% to admin)",
+              percentage: "0.5%",
+              example: "Token volume: $100K/month | Your commission: $500/month = $6K/year per token"
+            },
+            gas_markup: {
+              description: "40% markup on gas fees for external withdrawals",
+              percentage: "40%"
+            }
+          },
+          
+          client_benefits: {
+            benefit1: "Tokenization infrastructure (your cost: ~$0.10 per token)",
+            benefit2: "Ready-to-use marketplace",
+            benefit3: "Instant liquidity (day 1 traders)",
+            benefit4: "Security & compliance handled by you",
+            client_pays: "$500 setup + $200/year only"
+          },
+          
+          projections: {
+            year1: {
+              tokens: "20 new tokens",
+              setup_fees: "20 × $500 = $10K",
+              annual_fees: "20 × $200 = $4K",
+              trading_commissions: "0.5% of ~$100M volume = $500K",
+              total: "$514K"
+            },
+            year2: {
+              tokens: "100 total tokens",
+              setup_fees: "100 × $500 = $50K",
+              annual_fees: "100 × $200 = $20K",
+              trading_commissions: "0.5% of ~$1.6B volume = $8M",
+              total: "$8.07M"
+            },
+            year3: {
+              tokens: "300 total tokens",
+              setup_fees: "300 × $500 = $150K",
+              annual_fees: "300 × $200 = $60K",
+              trading_commissions: "0.5% of ~$12B volume = $60M",
+              total: "$60.21M"
+            }
+          }
+        }
+      },
+      
+      revenue_summary: {
+        title: "Combined Revenue (Crypto + RWA)",
+        year1: {
+          crypto: "$204K",
+          rwa: "$654K",
+          total: "$858K",
+          margin: "82.5%"
+        },
+        year2: {
+          crypto: "$1.02M",
+          rwa: "$8.07M",
+          total: "$9.09M",
+          margin: "91.2%"
+        },
+        year3: {
+          crypto: "$2.04M",
+          rwa: "$60.21M",
+          total: "$62.25M",
+          margin: "96.8%"
+        }
+      },
+      
+      key_points: [
+        "100% of all revenues go to admin (you)",
+        "Clients get access to infrastructure, not revenue sharing",
+        "Setup fees are immediate revenue",
+        "Trading commissions scale infinitely with volume",
+        "Gas markup is pure profit (minimal infrastructure cost)",
+        "Zero customer acquisition cost (clients bring themselves)"
+      ]
+    });
+  });
+
+  // Documentation: API Examples
+  app.get("/api/docs/examples", (req, res) => {
+    res.json({
+      title: "Tatum API Gateway - Usage Examples",
+      
+      authentication: {
+        description: "All requests require x-api-key header",
+        example: "curl -H 'x-api-key: YOUR_API_KEY' https://api.example.com/api/v1/...",
+        headers: {
+          "x-api-key": "Your API key from admin",
+          "Content-Type": "application/json"
+        }
+      },
+      
+      crypto_examples: {
+        title: "CRYPTO Panel Examples",
+        
+        create_virtual_account: {
+          description: "Client creates virtual account to hold crypto",
+          endpoint: "POST /api/v1/gateway/virtual-accounts",
+          request: {
+            accountType: "individual"
+          },
+          response: {
+            success: true,
+            virtualAccount: {
+              id: "va-123",
+              tenantId: "client-1",
+              accountType: "individual",
+              balances: {
+                BTC: "0",
+                ETH: "0",
+                SOL: "0"
+              },
+              status: "active"
+            }
+          }
+        },
+        
+        internal_swap_0_5_percent: {
+          description: "Client swaps BTC to ETH (0.5% commission to admin)",
+          endpoint: "POST /api/v1/gateway/swap",
+          request: {
+            fromAccountId: "va-123",
+            fromAsset: "BTC",
+            toAsset: "ETH",
+            amount: "1.0"
+          },
+          response: {
+            success: true,
+            swap: {
+              id: "swap-456",
+              fromAsset: "BTC",
+              toAsset: "ETH",
+              amount: "1.0",
+              commission: "0.005 BTC (0.5% to admin)",
+              status: "completed"
+            },
+            note: "Zero gas fees, 0.5% commission applied"
+          }
+        },
+        
+        external_withdraw_40_percent_markup: {
+          description: "Client withdraws to external wallet (40% gas markup to admin)",
+          endpoint: "POST /api/v1/gateway/withdraw",
+          request: {
+            fromAccountId: "va-123",
+            asset: "ETH",
+            amount: "1.0",
+            toAddress: "0x1234567890abcdef..."
+          },
+          response: {
+            success: true,
+            withdrawal: {
+              id: "withdraw-789",
+              asset: "ETH",
+              amount: "1.0",
+              toAddress: "0x1234567890abcdef...",
+              gasReal: "3 USD",
+              gasCharged: "4.20 USD (40% markup)",
+              adminProfit: "1.20 USD",
+              status: "pending",
+              txHash: "0xabcd..."
+            }
+          }
+        },
+        
+        view_transaction_history: {
+          description: "Client views their transaction history",
+          endpoint: "GET /api/v1/transactions?limit=50",
+          response: {
+            success: true,
+            transactions: [
+              {
+                id: "swap-456",
+                type: "internal_swap",
+                asset: "BTC",
+                amount: "1.0",
+                commission: "0.005",
+                status: "completed",
+                createdAt: "2024-11-30T10:00:00Z"
+              }
+            ],
+            pagination: {
+              total: 42,
+              limit: 50,
+              offset: 0
+            }
+          }
+        }
+      },
+      
+      rwa_examples: {
+        title: "RWA Panel Examples",
+        
+        create_rwa_token_500_setup: {
+          description: "Client creates token (pays $500 setup fee to admin)",
+          endpoint: "POST /api/v1/rwa/tokens",
+          request: {
+            assetName: "Real Estate Fund",
+            symbol: "REF",
+            blockchain: "ethereum",
+            decimals: 18,
+            totalSupply: "1000000",
+            issuerName: "RE Properties Inc",
+            description: "Tokenized real estate investment"
+          },
+          response: {
+            success: true,
+            token: {
+              id: "token-ref-1",
+              assetName: "Real Estate Fund",
+              symbol: "REF",
+              blockchain: "ethereum",
+              totalSupply: "1000000",
+              smartContractAddress: "0x...",
+              status: "created"
+            },
+            pricing: {
+              setupFee: "$500 (one-time) - PAID TO ADMIN",
+              annualFee: "$200/year - PAID TO ADMIN",
+              tradingCommission: "0.5% on all trades - 100% TO ADMIN"
+            }
+          }
+        },
+        
+        list_rwa_tokens: {
+          description: "Client views their tokens and trading volume",
+          endpoint: "GET /api/v1/rwa/tokens",
+          response: {
+            success: true,
+            tokens: [
+              {
+                id: "token-ref-1",
+                assetName: "Real Estate Fund",
+                symbol: "REF",
+                blockchain: "ethereum",
+                totalSupply: "1000000",
+                status: "active",
+                setupFee: 500,
+                annualFee: 200,
+                tradingVolume: "250000 USD",
+                tradingCommission: "1250 USD (0.5% to admin)"
+              }
+            ],
+            summary: {
+              totalTokens: 1,
+              totalTradingCommissions: "1250 USD (100% to admin)",
+              setupFeesCollected: "500 USD (100% to admin)"
+            }
+          }
+        },
+        
+        rwa_token_transfer_0_5_percent: {
+          description: "Token holder trades REF token (0.5% commission to admin)",
+          endpoint: "POST /api/v1/rwa/tokens/token-ref-1/transfer",
+          request: {
+            toAddress: "0xabcd...",
+            amount: "100"
+          },
+          response: {
+            success: true,
+            transfer: {
+              id: "transfer-123",
+              tokenId: "token-ref-1",
+              amount: "100 REF",
+              toAddress: "0xabcd...",
+              commission: "0.5 REF (0.5% to admin)",
+              status: "completed",
+              txHash: "0x..."
+            },
+            note: "0.5% trading commission applied and collected by admin"
+          }
+        }
+      },
+      
+      admin_examples: {
+        title: "Admin Dashboard Examples",
+        
+        view_revenue: {
+          description: "Admin views total revenue (swaps + gas markup)",
+          endpoint: "GET /api/admin/revenue",
+          response: {
+            success: true,
+            cryptoRevenue: {
+              totalSwapCommissions: "1245.67 USD",
+              totalGasMarkupRevenue: "3456.78 USD",
+              totalVolume: "249000 USD",
+              revenueByBlockchain: {
+                ethereum: "2345.67",
+                polygon: "1234.56",
+                bitcoin: "3456.78"
+              }
+            }
+          }
+        },
+        
+        view_rwa_revenue: {
+          description: "Admin views RWA revenue (setup + annual + trading commissions)",
+          endpoint: "GET /api/admin/rwa-revenue",
+          response: {
+            success: true,
+            rwaRevenue: {
+              setupFees: {
+                count: 12,
+                total: "6000 USD"
+              },
+              annualFees: {
+                activeClients: 12,
+                total: "2400 USD"
+              },
+              tradingCommissions: {
+                thisMonth: "12500 USD",
+                thisYear: "125000 USD",
+                rate: "0.5% of all trading volume"
+              },
+              totalMonthlyRevenue: "15000 USD"
+            }
+          }
+        }
+      },
+      
+      security: {
+        authentication: "x-api-key header (Tatum v3 recommended)",
+        encryption: "All private keys encrypted with AES-256",
+        audit: "All transactions logged with full audit trail",
+        rateLimit: "Starter 10/sec, Scale 100/sec, Enterprise 1000/sec",
+        documentation: "https://docs.tatum.io/docs/authentication"
+      }
+    });
+  });
+
+  // Quick reference: API Endpoints Summary
+  app.get("/api/docs", (req, res) => {
+    res.json({
+      title: "Tatum API Gateway - Complete Documentation",
+      message: "For full details, visit these documentation endpoints:",
+      
+      available_docs: {
+        business_model: "GET /api/docs/model - Full explanation of revenue streams",
+        examples: "GET /api/docs/examples - Usage examples for Crypto and RWA",
+        this_endpoint: "GET /api/docs - This page",
+        api_root: "GET / - API info and business model overview"
+      },
+      
+      quick_endpoints: {
+        "Crypto Panel": [
+          "POST /api/v1/gateway/virtual-accounts - Create virtual account",
+          "POST /api/v1/gateway/swap - Internal swap (0.5% commission)",
+          "POST /api/v1/gateway/withdraw - External withdraw (40% gas markup)",
+          "GET /api/v1/transactions - Transaction history"
+        ],
+        "RWA Panel": [
+          "POST /api/v1/rwa/tokens - Create token ($500 setup fee)",
+          "GET /api/v1/rwa/tokens - List tokens",
+          "POST /api/v1/rwa/tokens/:id/transfer - Trade token (0.5% commission)"
+        ],
+        "Admin": [
+          "GET /api/admin/revenue - Crypto revenue dashboard",
+          "GET /api/admin/rwa-revenue - RWA revenue dashboard",
+          "GET /api/admin/master-wallets - List master wallets",
+          "POST /api/admin/master-wallets - Create master wallet"
+        ]
+      },
+      
+      authentication: {
+        method: "x-api-key header",
+        example: "Authorization: x-api-key YOUR_API_KEY",
+        documentation: "https://docs.tatum.io/docs/authentication"
+      },
+      
+      support: {
+        github: "https://github.com/MasterFital/tatum-api-gateway",
+        tatum_docs: "https://api.tatum.io/docs",
+        api_reference: "https://docs.tatum.io/reference/welcome-to-the-tatum-api-reference"
+      }
     });
   });
 
