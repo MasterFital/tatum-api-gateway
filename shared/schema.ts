@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, real, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, real, index, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -45,6 +45,140 @@ export const tenants = pgTable("tenants", {
   index("tenants_status_idx").on(table.status),
 ]);
 
+// SCENARIO 1 & 3: Master Wallets (You control or assign to clients)
+export const masterWallets = pgTable("master_wallets", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  scenario: text("scenario").notNull(),  // 'scenario1' or 'scenario3'
+  blockchain: text("blockchain").notNull(),
+  assetType: text("asset_type").notNull(),  // 'crypto' or 'token'
+  assetName: text("asset_name").notNull(),  // 'BTC', 'ETH', 'GOLD', 'SILVER'
+  
+  // Address & Keys (ENCRYPTED)
+  address: text("address").notNull().unique(),
+  publicKey: text("public_key"),
+  privateKeyEncrypted: text("private_key_encrypted"),
+  privateKeyIv: varchar("private_key_iv", { length: 32 }),
+  
+  // Token specific
+  smartContractAddress: text("smart_contract_address"),
+  tokenDecimals: integer("token_decimals"),
+  
+  // For Scenario 3: Assign to client
+  assignedToTenantId: varchar("assigned_to_tenant_id", { length: 36 }).references(() => tenants.id),
+  
+  // Balance tracking
+  balance: text("balance").default("0"),
+  balanceUsd: text("balance_usd").default("0"),
+  lastSyncTime: timestamp("last_sync_time"),
+  
+  // Gas settings override (for this master)
+  gasMarkupPercentage: integer("gas_markup_percentage").default(40),
+  
+  status: text("status").notNull().default("active"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("masters_blockchain_idx").on(table.blockchain),
+  index("masters_asset_idx").on(table.assetName),
+  index("masters_address_idx").on(table.address),
+  index("masters_tenant_idx").on(table.assignedToTenantId),
+  index("masters_scenario_idx").on(table.scenario),
+]);
+
+// SCENARIO 1 & 3: Virtual Accounts (Client balances in your system)
+export const virtualAccounts = pgTable("virtual_accounts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  accountType: text("account_type").notNull(),  // 'crypto' or 'token'
+  
+  // Balances as JSONB (flexible for multiple assets)
+  balances: jsonb("balances").default(sql`'{}'`),  // { "ETH": "1000000000000000000", "BTC": "150000000" }
+  
+  status: text("status").notNull().default("active"),
+  frozen: boolean("frozen").default(false),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("virtual_accounts_tenant_idx").on(table.tenantId),
+  index("virtual_accounts_status_idx").on(table.status),
+]);
+
+// SCENARIO 1 & 3: Transactions (Internal swaps + External withdraws)
+export const cryptoTransactions = pgTable("crypto_transactions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  
+  type: text("type").notNull(),  // 'internal_swap', 'external_withdraw', 'external_deposit'
+  scenario: text("scenario").notNull(),  // 'scenario1' or 'scenario3'
+  
+  // Internal swap
+  fromAccountId: varchar("from_account_id", { length: 36 }),
+  toAccountId: varchar("to_account_id", { length: 36 }),
+  
+  // External
+  toExternalAddress: text("to_external_address"),
+  fromExternalAddress: text("from_external_address"),
+  
+  // Asset info
+  assetType: text("asset_type").notNull(),  // 'crypto' or 'token'
+  assetName: text("asset_name").notNull(),
+  blockchain: text("blockchain").notNull(),
+  amount: text("amount").notNull(),
+  
+  // Gas & Commission
+  gasReal: text("gas_real"),  // Actual gas paid to blockchain
+  gasMarkupPercent: integer("gas_markup_percent"),  // Admin configured
+  gasCharged: text("gas_charged"),  // Total charged to customer
+  commissionAmount: text("commission_amount"),  // Your profit from markup
+  commissionUsd: text("commission_usd"),
+  
+  // Status
+  status: text("status").notNull().default("pending"),
+  
+  // Blockchain info
+  txHash: text("tx_hash").unique(),
+  blockNumber: integer("block_number"),
+  confirmations: integer("confirmations"),
+  
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  executedAt: timestamp("executed_at"),
+  confirmedAt: timestamp("confirmed_at"),
+}, (table) => [
+  index("crypto_tx_tenant_idx").on(table.tenantId),
+  index("crypto_tx_type_idx").on(table.type),
+  index("crypto_tx_status_idx").on(table.status),
+  index("crypto_tx_hash_idx").on(table.txHash),
+  index("crypto_tx_scenario_idx").on(table.scenario),
+]);
+
+// Admin Gas Settings (Global config)
+export const gasSettings = pgTable("gas_settings", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Global default
+  globalDefaultMarkup: integer("global_default_markup").default(40),
+  minMarkup: integer("min_markup").default(10),
+  maxMarkup: integer("max_markup").default(100),
+  
+  // Per-client overrides (stored as JSONB)
+  clientOverrides: jsonb("client_overrides").default(sql`'{}'`),  // { "tenant-123": { "markup": 50, "reason": "..." } }
+  
+  // Blockchain multipliers
+  blockchainMultipliers: jsonb("blockchain_multipliers").default(sql`'{"ethereum": 1.0, "polygon": 0.3}'`),
+  
+  // Transaction type overrides
+  transactionTypeOverrides: jsonb("transaction_type_overrides").default(sql`'{"crypto_withdraw": 40, "token_transfer": 45}'`),
+  
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: text("updated_by"),  // Admin ID
+}, (table) => [
+  index("gas_settings_updated_idx").on(table.updatedAt),
+]);
+
+// Other tables (keeping from original schema)
 export const addresses = pgTable("addresses", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id", { length: 36 }).notNull().references(() => tenants.id, { onDelete: "cascade" }),
@@ -112,23 +246,6 @@ export const webhooks = pgTable("webhooks", {
   index("webhooks_active_idx").on(table.active),
 ]);
 
-export const virtualAccounts = pgTable("virtual_accounts", {
-  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  tenantId: varchar("tenant_id", { length: 36 }).notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  customerId: text("customer_id"),
-  currency: text("currency").notNull(),
-  accountNumber: text("account_number").notNull().unique(),
-  balance: text("balance").default("0"),
-  depositAddresses: text("deposit_addresses").array().default(sql`ARRAY[]::text[]`),
-  status: text("status").notNull().default("active"),
-  frozen: boolean("frozen").default(false),
-  metadata: jsonb("metadata"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
-  index("virtual_accounts_tenant_idx").on(table.tenantId),
-  index("virtual_accounts_customer_idx").on(table.customerId),
-]);
-
 export const apiUsage = pgTable("api_usage", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id", { length: 36 }).notNull().references(() => tenants.id, { onDelete: "cascade" }),
@@ -181,6 +298,7 @@ export const auditLogs = pgTable("audit_logs", {
   index("audit_logs_action_idx").on(table.action),
 ]);
 
+// Relations
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   addresses: many(addresses),
   transactions: many(transactions),
@@ -189,42 +307,29 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   apiUsage: many(apiUsage),
   billingAggregations: many(billingAggregations),
   auditLogs: many(auditLogs),
+  masterWallets: many(masterWallets),
+  cryptoTransactions: many(cryptoTransactions),
 }));
 
-export const addressesRelations = relations(addresses, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [addresses.tenantId],
-    references: [tenants.id],
-  }),
-}));
+// Insert schemas
+export const insertMasterWalletSchema = createInsertSchema(masterWallets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
 
-export const transactionsRelations = relations(transactions, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [transactions.tenantId],
-    references: [tenants.id],
-  }),
-}));
+export const insertVirtualAccountSchema = createInsertSchema(virtualAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
 
-export const webhooksRelations = relations(webhooks, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [webhooks.tenantId],
-    references: [tenants.id],
-  }),
-}));
-
-export const virtualAccountsRelations = relations(virtualAccounts, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [virtualAccounts.tenantId],
-    references: [tenants.id],
-  }),
-}));
-
-export const apiUsageRelations = relations(apiUsage, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [apiUsage.tenantId],
-    references: [tenants.id],
-  }),
-}));
+export const insertCryptoTransactionSchema = createInsertSchema(cryptoTransactions).omit({
+  id: true,
+  createdAt: true,
+  executedAt: true,
+  confirmedAt: true,
+});
 
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -249,11 +354,6 @@ export const insertWebhookSchema = createInsertSchema(webhooks).omit({
   createdAt: true,
 });
 
-export const insertVirtualAccountSchema = createInsertSchema(virtualAccounts).omit({
-  id: true,
-  createdAt: true,
-});
-
 export const insertApiUsageSchema = createInsertSchema(apiUsage).omit({
   id: true,
   timestamp: true,
@@ -264,16 +364,21 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
   timestamp: true,
 });
 
+// Types
 export type Tenant = typeof tenants.$inferSelect;
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
+export type MasterWallet = typeof masterWallets.$inferSelect;
+export type InsertMasterWallet = z.infer<typeof insertMasterWalletSchema>;
+export type VirtualAccount = typeof virtualAccounts.$inferSelect;
+export type InsertVirtualAccount = z.infer<typeof insertVirtualAccountSchema>;
+export type CryptoTransaction = typeof cryptoTransactions.$inferSelect;
+export type InsertCryptoTransaction = z.infer<typeof insertCryptoTransactionSchema>;
 export type Address = typeof addresses.$inferSelect;
 export type InsertAddress = z.infer<typeof insertAddressSchema>;
 export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
 export type Webhook = typeof webhooks.$inferSelect;
 export type InsertWebhook = z.infer<typeof insertWebhookSchema>;
-export type VirtualAccount = typeof virtualAccounts.$inferSelect;
-export type InsertVirtualAccount = z.infer<typeof insertVirtualAccountSchema>;
 export type ApiUsage = typeof apiUsage.$inferSelect;
 export type InsertApiUsage = z.infer<typeof insertApiUsageSchema>;
 export type BillingAggregation = typeof billingAggregations.$inferSelect;
