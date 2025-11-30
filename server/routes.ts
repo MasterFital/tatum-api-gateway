@@ -26,6 +26,8 @@ import {
   insertAddressSchema,
   insertWebhookSchema,
 } from "@shared/schema";
+import { KMS } from "./lib/kms";
+import { encrypt, decrypt } from "./lib/encryption";
 
 const CreateTenantSchema = z.object({
   name: z.string().min(2),
@@ -2263,23 +2265,45 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     assetName: z.string(),
     address: z.string(),
     publicKey: z.string().optional(),
+    privateKey: z.string().optional(),  // Optional: if provided, will be encrypted
+    assetType: z.enum(["crypto", "token"]).default("crypto"),
   });
 
-  // Create Master Wallet (Admin only)
+  // Create Master Wallet (Admin only) - with AES-256-GCM encryption for private keys
   app.post("/api/admin/master-wallets", adminAuthMiddleware, async (req, res) => {
     try {
       const data = CreateMasterWalletSchema.parse(req.body);
       const { db } = await import("./db");
       const { masterWallets } = await import("@shared/schema");
+      const kms = KMS.getInstance();
+
+      let encryptedPrivateKey = null;
+      let privateKeyIv = null;
+      let privateKeyAuthTag = null;
+
+      // If private key provided, encrypt with KMS-derived key
+      if (data.privateKey) {
+        const walletId = `mw_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const encryptionKey = kms.derivePrivateKeyEncryptionKey(walletId);
+        const encrypted = encrypt(data.privateKey, encryptionKey);
+        
+        encryptedPrivateKey = encrypted.ciphertext;
+        privateKeyIv = encrypted.iv;
+        privateKeyAuthTag = encrypted.authTag;
+      }
 
       const wallet = await db
         .insert(masterWallets)
         .values({
           scenario: "scenario1",
           blockchain: data.blockchain,
+          assetType: data.assetType,
           assetName: data.assetName,
           address: data.address,
           publicKey: data.publicKey,
+          privateKeyEncrypted: encryptedPrivateKey,
+          privateKeyIv: privateKeyIv,
+          privateKeyAuthTag: privateKeyAuthTag,
           balance: "0",
           balanceUsd: "0",
           status: "active",
@@ -2291,7 +2315,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         action: "master_wallet.created",
         resource: "master_wallet",
         resourceId: wallet[0].id,
-        changes: { blockchain: data.blockchain, assetName: data.assetName },
+        changes: { 
+          blockchain: data.blockchain, 
+          assetName: data.assetName,
+          encrypted: !!data.privateKey ? "yes (AES-256-GCM)" : "no"
+        },
       });
 
       res.status(201).json({
@@ -2303,12 +2331,74 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           address: wallet[0].address,
           balance: wallet[0].balance,
           status: wallet[0].status,
+          encrypted: !!data.privateKey,
           createdAt: wallet[0].createdAt,
         },
+        warning: data.privateKey ? "Private key is encrypted with AES-256-GCM. Use GET /api/admin/master-wallets/{id}/private-key to decrypt." : undefined,
         requestId: req.requestId,
       });
     } catch (error: any) {
       console.error("Create master wallet error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Get decrypted private key (Admin only, audit logged)
+  app.get("/api/admin/master-wallets/:id/private-key", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { masterWallets } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const kms = KMS.getInstance();
+
+      const wallet = await db.query.masterWallets.findFirst({
+        where: eq(masterWallets.id, req.params.id),
+      });
+
+      if (!wallet) {
+        return res.status(404).json({ success: false, error: "Wallet not found" });
+      }
+
+      if (!wallet.privateKeyEncrypted || !wallet.privateKeyIv || !wallet.privateKeyAuthTag) {
+        return res.status(400).json({ success: false, error: "No encrypted private key found" });
+      }
+
+      try {
+        const encryptionKey = kms.derivePrivateKeyEncryptionKey(wallet.id);
+        const decrypted = decrypt(
+          {
+            ciphertext: wallet.privateKeyEncrypted,
+            iv: wallet.privateKeyIv,
+            authTag: wallet.privateKeyAuthTag,
+            algorithm: "aes-256-gcm",
+          },
+          encryptionKey
+        );
+
+        // Audit log for security
+        await storage.createAuditLog({
+          tenantId: "admin",
+          action: "master_wallet.private_key_decrypted",
+          resource: "master_wallet",
+          resourceId: wallet.id,
+          changes: { blockchain: wallet.blockchain, assetName: wallet.assetName },
+        });
+
+        res.json({
+          success: true,
+          privateKey: decrypted,
+          walletId: wallet.id,
+          blockchain: wallet.blockchain,
+          address: wallet.address,
+          warning: "NEVER share this private key. It's logged in audit trail.",
+          requestId: req.requestId,
+        });
+      } catch (decryptError) {
+        console.error("Decryption failed:", decryptError);
+        res.status(500).json({ success: false, error: "Decryption failed - private key may be corrupted" });
+      }
+    } catch (error: any) {
+      console.error("Get private key error:", error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

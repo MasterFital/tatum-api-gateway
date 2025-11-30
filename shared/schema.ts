@@ -53,11 +53,12 @@ export const masterWallets = pgTable("master_wallets", {
   assetType: text("asset_type").notNull(),  // 'crypto' or 'token'
   assetName: text("asset_name").notNull(),  // 'BTC', 'ETH', 'GOLD', 'SILVER'
   
-  // Address & Keys (ENCRYPTED)
+  // Address & Keys (ENCRYPTED with AES-256-GCM)
   address: text("address").notNull().unique(),
   publicKey: text("public_key"),
   privateKeyEncrypted: text("private_key_encrypted"),
   privateKeyIv: varchar("private_key_iv", { length: 32 }),
+  privateKeyAuthTag: varchar("private_key_auth_tag", { length: 32 }),  // GCM authentication tag
   
   // Token specific
   smartContractAddress: text("smart_contract_address"),
