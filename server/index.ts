@@ -1,6 +1,10 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { createServer } from "http";
+import { resolve } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = resolve(fileURLToPath(import.meta.url), "..");
 
 const app = express();
 const httpServer = createServer(app);
@@ -20,6 +24,11 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// Serve static frontend files in production
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(resolve(__dirname, "../dist/public")));
+}
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -87,13 +96,19 @@ app.get("/", (req, res) => {
     throw err;
   });
 
-  // Fallback 404 handler
+  // Fallback handler: serve SPA for non-API routes, 404 for API routes
   app.use((req, res) => {
-    res.status(404).json({
-      error: "Not Found",
-      path: req.path,
-      message: "This API endpoint does not exist. See GET / for available endpoints.",
-    });
+    // For API routes, return JSON 404
+    if (req.path.startsWith("/api")) {
+      res.status(404).json({
+        error: "Not Found",
+        path: req.path,
+        message: "This API endpoint does not exist. See GET / for available endpoints.",
+      });
+    } else {
+      // For non-API routes, serve the SPA index.html for client-side routing
+      res.sendFile(resolve(__dirname, "../dist/public/index.html"));
+    }
   });
 
   const port = parseInt(process.env.PORT || "5000", 10);
