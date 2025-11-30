@@ -519,6 +519,65 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  // ============================================================
+  // TATUM PRODUCTION TEST ENDPOINT
+  // ============================================================
+  // Test connection to Tatum API (requires TATUM_API_KEY in production)
+  app.get("/api/test-tatum", async (req, res) => {
+    try {
+      const tatumHealth = await tatumClient.healthCheck();
+      
+      const testStatus = {
+        success: tatumHealth.success,
+        message: tatumHealth.success 
+          ? "✅ Connected to Tatum API successfully" 
+          : "❌ Failed to connect to Tatum API",
+        tatumApiUrl: process.env.TATUM_API_URL || "https://api.tatum.io",
+        apiKeyConfigured: !!process.env.TATUM_API_KEY,
+        apiKeyLength: process.env.TATUM_API_KEY?.length || 0,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (tatumHealth.success && tatumHealth.data) {
+        testStatus.blockchainInfo = {
+          chain: tatumHealth.data.chain,
+          blocks: tatumHealth.data.blocks,
+          mempool: tatumHealth.data.mempool,
+        };
+      }
+
+      if (tatumHealth.error) {
+        testStatus.error = tatumHealth.error;
+        testStatus.statusCode = tatumHealth.statusCode;
+      }
+
+      res.json({
+        success: tatumHealth.success,
+        test: "Tatum API Connection Test",
+        status: testStatus,
+        instructions: {
+          production: "Configure TATUM_API_KEY environment variable with your Tatum production API key",
+          documentation: "https://docs.tatum.io/docs/authentication",
+          getApiKey: "https://dashboard.tatum.io"
+        },
+        requestId: req.requestId,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        test: "Tatum API Connection Test",
+        error: error.message,
+        message: "Failed to test Tatum connection",
+        instructions: {
+          checkApiKey: "Ensure TATUM_API_KEY is set in environment variables",
+          checkUrl: "Verify TATUM_API_URL is correct",
+          documentation: "https://docs.tatum.io/docs/authentication"
+        },
+        requestId: req.requestId,
+      });
+    }
+  });
+
   // Quick reference: API Endpoints Summary
   app.get("/api/docs", (req, res) => {
     res.json({
@@ -528,6 +587,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       available_docs: {
         business_model: "GET /api/docs/model - Full explanation of revenue streams",
         examples: "GET /api/docs/examples - Usage examples for Crypto and RWA",
+        tatum_test: "GET /api/test-tatum - Test connection to Tatum API (production check)",
         this_endpoint: "GET /api/docs - This page",
         api_root: "GET / - API info and business model overview"
       },
